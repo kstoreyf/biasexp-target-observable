@@ -1,0 +1,6 @@
+# my folders
+data/
+plots/
+
+# jupyter
+.ipynb_checkpoints/
