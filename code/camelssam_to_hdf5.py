@@ -5,6 +5,7 @@ import pandas as pd
 import subprocess
 import time
 
+#to tar, in notebook: !tar -czvf CAMELS-SAM_data_n107.tar.gz CAMELS-SAM_data
 
 def main():
     idxs_sam = np.arange(0,1000)
