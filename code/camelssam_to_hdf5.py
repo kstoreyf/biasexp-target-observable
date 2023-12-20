@@ -7,17 +7,18 @@ import time
 
 
 def main():
-    idxs_sam = [613]
+    idxs_sam = np.arange(0,1000)
+    #idxs_sam = [0, 1]
     #idxs_sam = [613, 257, 61, 579, 96]
     
     galprop_fields = ['redshift', 'halo_index', 'sat_type', 'mstar', 'mhalo', 'rhalo', 'sfr', 'sfrave1gyr',
-                  'x_position', 'y_position', 'z_position', 'vx', 'vy', 'vz', ]
+                      'x_position', 'y_position', 'z_position', 'vx', 'vy', 'vz']
     redshift = 0
 
-    #dir_sams = '/Data/SCSAM/LH'
-    #dir_dat = '/CAMELS-SAM_data'
-    dir_sams = '/dipc/kstoreyf/CAMELS-SAM'
-    dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
+    dir_sams = '/home/jovyan/Data/SCSAM/LH'
+    dir_dat = '/home/jovyan/CAMELS-SAM_data'
+    #dir_sams = '/dipc/kstoreyf/CAMELS-SAM'
+    #dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
 
     os.chdir(f'{dir_sams}/LH_{idxs_sam[0]}') 
     totaldirs=(subprocess.check_output('''ls -l sc-sam/ | grep -c ^d''', shell=True,text=True))
@@ -26,16 +27,27 @@ def main():
 
     dats_sam = []
     for idx_sam in idxs_sam:
-        print(f'reading sam lh_{idx_sam}')
+        fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
+        
+        if os.path.exists(fn_dat):
+            print(f'File {fn_dat} already exists, skipping!')
+            continue
+        
+        print(f'reading sam LH_{idx_sam}')
         s = time.time()
-        dat_sam = ProcessSAMdat_single_redshift_lite(f'{dir_sams}/LH_{idx_sam}/sc-sam', 
-                                                       nsubvol, redshift, galprop_fields, 'gal')
-        print('camels-sam simulation lh',idx_sam,' at redshift ', redshift, ' has this many galaxies: ', dat_sam.shape)
-        e = time.time()
-        print(f'Reading time: {e-s} s')
-    
+        try:
+            dat_sam = ProcessSAMdat_single_redshift_lite(f'{dir_sams}/LH_{idx_sam}/sc-sam', 
+                                                           nsubvol, redshift, galprop_fields, 'gal')
+            print('CAMELS-SAM simulation LH',idx_sam,' at redshift ', redshift, ' has this many galaxies: ', dat_sam.shape)
+            e = time.time()
+            print(f'Reading time: {e-s} s')
+
+        except FileNotFoundError as err:
+            print('Missing file!! in LH', idx_sam)
+            print(err)
+            continue
+        
         s = time.time()
-        fn_dat = f'{dir_dat}/lh_{idx_sam}_galprops_z{redshift}.hdf5'
         with h5py.File(fn_dat, 'w') as f:
             print('Saving data to', fn_dat)
             for i in range(len(galprop_fields)):
@@ -46,7 +58,6 @@ def main():
         e = time.time()
         print(f'Writing time: {e-s} s')
 
-                
 
 
 def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswanted, gal_or_halo):
@@ -78,6 +89,21 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
     else:
         return "Fieldswanted should be a list with the fields you want as strings!"
 
+    # fix so guaranteed to get reshift correct index
+    fieldswanted_ordered = []
+    if gal_or_halo=='gal':
+        colnames = g_colnames
+    elif gal_or_halo=='halo':
+        colnames = h_colnames
+    else:
+        raise ValueError('gal_or_halo must be gal or halo!')
+    for col in colnames:
+        if col in fieldswanted:
+            fieldswanted_ordered.append(col) 
+    i_redshift = fieldswanted_ordered.index('redshift')
+    #print(fieldswanted_ordered)
+    #print(i_redshift)
+    
     All_halos=np.zeros((1,len(fieldswanted)))
     if gal_or_halo=="gal":
         checknums=0
@@ -97,12 +123,13 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
                     #print(current_galprops.shape)
                     
                     #print('For subvolume ',x_i,x_j,x_k, current_galprops.shape)
-                    unique_redshifts=set(current_galprops[:,0]) #update this if redshift will NOT be in the 0th column; see note above
+                    unique_redshifts=set(current_galprops[:,i_redshift]) #update this if redshift will NOT be in the 0th column; see note above
                     unique_redshifts = np.array(sorted(unique_redshifts))
                     # print(unique_redshifts)
                     idx = (np.abs(unique_redshifts - sought_z)).argmin()
-                    current_galprops_z=current_galprops[np.where(current_galprops[:,0][:]==unique_redshifts[idx])[0],:]
-                    # print(current_galprops_z.shape)
+        
+                    current_galprops_z=current_galprops[np.where(current_galprops[:,i_redshift][:]==unique_redshifts[idx])[0],:]
+                    #print(current_galprops_z.shape)
                     checknums=checknums+len(current_galprops_z)
                     All_halos=np.concatenate((All_halos,current_galprops_z))
                     #print(All_halos.shape)
@@ -117,10 +144,10 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
                                            delimiter=' ', skiprows=h_header_rows, names=h_colnames)
                     current_haloprops=haloprop[fieldswanted[:]].to_numpy()
                     print('For subvolume ',x_i,x_j,x_k, current_haloprops.shape)
-                    unique_redshifts=set(current_haloprops[:,0])
+                    unique_redshifts=set(current_haloprops[:,i_redshift])
                     unique_redshifts = np.array(sorted(unique_redshifts))
                     idx = (np.abs(unique_redshifts - sought_z)).argmin()
-                    current_haloprops_z=current_haloprops[np.where(current_haloprops[:,0][:]==unique_redshifts[idx])[0],:]
+                    current_haloprops_z=current_haloprops[np.where(current_haloprops[:,i_redshift][:]==unique_redshifts[idx])[0],:]
                     # print(current_haloprops_z.shape)
                     checknums2=checknums2+len(current_haloprops_z)
                     All_halos=np.concatenate((All_halos,current_haloprops_z))
@@ -136,3 +163,4 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
 
 if __name__=='__main__':
     main()
+
