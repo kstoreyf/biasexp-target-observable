@@ -98,10 +98,8 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
         colnames = h_colnames
     else:
         raise ValueError('gal_or_halo must be gal or halo!')
-    for col in colnames:
-        if col in fieldswanted:
-            fieldswanted_ordered.append(col) 
-    i_redshift = fieldswanted_ordered.index('redshift')
+    
+    i_redshift = fieldswanted.index('redshift')
     #print(fieldswanted_ordered)
     #print(i_redshift)
     
@@ -111,14 +109,12 @@ def ProcessSAMdat_single_redshift_lite(path_to_SAM, Nsubvols, sought_z, fieldswa
         for x_i in np.arange(0,Nsubvols,1):
             for x_j in np.arange(0,Nsubvols,1):
                 for x_k in np.arange(0,Nsubvols,1):
-                    #galprop = pd.read_csv('{}/{}_{}_{}/galprop_0-99.dat'.format(input_path, x_i, x_j, x_k),
-                    #                      delimiter=' ', skiprows=g_header_rows, names=g_colnames)
-                    # print('galprop read for ',x_i, x_j, x_k,' shape:', galprop.shape)
-                    #current_galprops=galprop[fieldswanted[:]].to_numpy()
                     
                     galprop = pd.read_csv('{}/{}_{}_{}/galprop_0-99.dat'.format(input_path, x_i, x_j, x_k),
                                           delimiter=' ', skiprows=len(g_colnames), names=g_colnames, 
                                           usecols=fieldswanted)            
+                    galprop = galprop[fieldswanted] # puts back in original order
+
                     #print(galprop)
                     current_galprops=galprop.to_numpy()
                     #print(current_galprops.shape)
