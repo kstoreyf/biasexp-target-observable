@@ -4,3 +4,6 @@ plots/
 
 # jupyter
 .ipynb_checkpoints/
+
+# vscode
+.vscode
