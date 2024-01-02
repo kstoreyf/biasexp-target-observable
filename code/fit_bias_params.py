@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import numpy as np
 import scipy
 
@@ -10,39 +11,55 @@ def main():
     fit_bias_params_loop(idxs_sam)
 
 
-def fit_bias_params_loop(idxs_sam):
-
+def fit_bias_params_loop(idxs_sam, n_threads=2):
+    
     emulator = baccoemu.Lbias_expansion()
     cosmo_params = setup_cosmo_emu()
 
-    def _ln_like(bias_params, k_data, pk_data, C_inv):
+    if n_threads>1:
+        pool = mp.Pool(processes=n_threads)
+        print("Starting multiprocessing pool")
+        # TODO check how to pass additional args
+        # TODO check whether i can pass more idxs_sam than threads 
+        # and if itll be smart about holding the queue
+        _ = pool.map(fit_bias_params, idxs_sam, 
+                     args=(emulator, cosmo_params))
+        print("Done!")
+    else:
+        for idx_sam in idxs_sam:
+            fit_bias_params(idx_sam, emulator, cosmo_params)
+
+
+def fit_bias_params(idx_sam, emulator, cosmo_params):
+
+    fn_pk = '../data/pks/pk_LH_{idx_sam}.npy'
+    fn_bp = '../data/bias_params_bestfit/bias_params_LH_{idx_sam}.npy'
+    pk = np.load(fn_pk, allow_pickle=True)
+    
+    k_sam_all = pk['k']
+    i_bins = k_sam_all < 0.75 #bc emulator can't go above this
+    k_sam = k_sam_all[i_bins]
+    C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
+    pk_sam = pk['pk'][i_bins]
+
+    print(f"Fitting SAM {idx_sam}")
+    bounds = get_bounds()
+    bias_params_0 = [0.5, 0.5, 1.0, -1.0]
+    res = scipy.optimize.minimize(ln_like, bias_params_0, bounds=bounds, 
+                                  args=(k_sam, pk_sam, C_inv, emulator, cosmo_params))
+    if res['success']:
+        np.save(fn_bp, res['x'])
+    else:
+        print(f"Oh no, optimizer failed for SAM {idx}! not saving params")
+
+
+def ln_like(bias_params, k_data, pk_data, C_inv, 
+            emulator, cosmo_params):
         _, p_gg, _ = emulator.get_galaxy_real_pk(bias=bias_params, k=k_data, 
                                                  **cosmo_params)
         delta_y = pk_data - p_gg
         lnlk = 0.5 * delta_y.T @ C_inv @ delta_y
         return lnlk
-
-    bounds = get_bounds()
-    bias_params_0 = [0.5, 0.5, 1.0, -1.0]
-    res_arr = []
-    for idx in idxs_sam:
-        fn_pk = '../data/pks/pk_LH_{idx}.npy'
-        fn_bp = '../data/bias_params_bestfit/bias_params_LH_{idx}.npy'
-        pk = np.load(fn_pk, allow_pickle=True)
-        
-        k_sam_all = pk['k']
-        i_bins = k_sam_all < 0.75 #bc emulator can't go above this
-        k_sam = k_sam_all[i_bins]
-        C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
-
-        print(f"Fitting SAM {idx}")
-        pk_sam = pk['pk'][i_bins]
-        res = scipy.optimize.minimize(_ln_like, bias_params_0, bounds=bounds, args=(k_sam, pk_sam, C_inv))
-        res_arr.append(res)
-        if res['success']:
-            np.save(fn_bp, res['x'])
-        else:
-            print(f"Oh no, optimizer failed for SAM {idx}! not saving params")
 
 
 def setup_cosmo_emu():
