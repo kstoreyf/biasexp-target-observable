@@ -7,3 +7,6 @@ plots/
 
 # vscode
 .vscode
+
+# nohup
+nohup.out

@@ -1,10 +1,10 @@
+from functools import partial
 import h5py
 import logging
 import multiprocessing as mp
 import numpy as np
-#import os
-#from os import listdir
-#from os.path import isfile, join
+import os
+import time
 
 import bacco
 
@@ -13,42 +13,58 @@ def main():
 
     args_power = setup_bacco()
     
-    idxs_sam = np.arange(0, 999)
-    compute_pks_loop(idxs_sam, args_power)
+    #idxs_sam = np.arange(0, 999)
+    #idxs_sam = np.arange(50, 1000)
+    redshift = 0
+    dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
+    idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
+                if os.path.isfile(f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5')]
+    compute_pks_loop(idxs_sam, args_power, overwrite=False, n_threads=12)
 
 
-def compute_pks_loop(idxs_sam, args_power, n_threads=2):
+def compute_pks_loop(idxs_sam, args_power, overwrite=False, n_threads=2):
     
-    #fns_dat = [join(dir_dat, f) for f in listdir(dir_dat) if isfile(join(dir_dat, f))]
-
+    start = time.time()
     if n_threads>1:
         pool = mp.Pool(processes=n_threads)
         print("Starting multiprocessing pool")
-        # TODO check how to pass additional args
-        # TODO check whether i can pass more idxs_sam than threads 
-        # and if itll be smart about holding the queue
-        _ = pool.map(compute_pk, idxs_sam, args=args_power)
+        outputs = pool.map(partial(compute_pk, args_power=args_power, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
+        outputs = []
         for idx_sam in idxs_sam:
-            compute_pk(idx_sam, args_power)
+            output = compute_pk(idx_sam, args_power=args_power, overwrite=overwrite)
+            outputs.append(output)
+    end = time.time()
+    n_success = np.sum(outputs==0)
+    print(f"Took {(end-start)/60} min to compute {n_success} pks with N={n_threads} threads")
         
 
 
-def compute_pk(idx_sam, args_power):
+def compute_pk(idx_sam, args_power=None, overwrite=False):
+
+    assert args_power is not None, "Must pass args_power!"
 
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     redshift = 0
+    
+    fn_dat = f"{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5"
+    if not os.path.isfile(fn_dat):
+        print(f"[SAM LH {idx_sam}] File {fn_dat} does not exist! Moving on")
+        return 1
 
-    fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
-    fn_pk = '../data/pks/pk_LH_{idx_sam}.npy'
+    fn_pk = f'../data/pks/pk_LH_{idx_sam}.npy'
+    if os.path.isfile(fn_pk) and not overwrite:
+        print(f"[SAM LH {idx_sam}] Pk {fn_pk} already exists and overwrite={overwrite}! Moving on")
+        return 1
+
     with h5py.File(fn_dat, 'r') as f:
         x_arr, y_arr, z_arr = f['x_position'], f['y_position'], f['z_position']
         pos_arr = np.array([x_arr, y_arr, z_arr]).T
         pk = bacco.statistics.compute_powerspectrum(pos=pos_arr, **args_power)
-        # TODO check that want to be saving whole pk dict, 
-        # vs just pk['pk'] and pk['k']
         np.save(fn_pk, pk)
+
+    return 0
 
 
 def setup_bacco():
@@ -110,7 +126,7 @@ def setup_bacco():
 
     bacco.configuration.update({'nonlinear' : {'concentration' : 'ludlow16'}})
 
-    bacco.configuration.update({'number_of_threads' : 12})
+    bacco.configuration.update({'number_of_threads' : 1})
     bacco.configuration.update({'scaling' : {'disp_ngrid' : ngrid}})
 
     bacco.configuration.update({'pk':{'boltzmann_solver': 'CLASS'}})
