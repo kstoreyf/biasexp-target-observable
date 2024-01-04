@@ -46,7 +46,7 @@ def fit_bias_params_loop(idxs_sam, n_threads=2, overwrite=False):
             outputs.append(output)
     end = time.time()
     n_success = np.sum(outputs==0)
-    print(f"Took {(end-start)/60} min to compute {n_success} pks with N={n_threads} threads")
+    print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
 def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
@@ -80,7 +80,7 @@ def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
                                   args=(k_sam, pk_sam, C_inv, emulator, cosmo_params))
     
     if res['success']:
-        print("Fit for SAM {idx_sam} terminated successfully!")
+        print(f"Fit for SAM {idx_sam} terminated successfully!")
         bias_params_fit_dict = dict(zip(bias_param_names, res['x']))
         np.save(fn_bp, bias_params_fit_dict)
         return 0
