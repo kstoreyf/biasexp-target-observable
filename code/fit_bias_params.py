@@ -120,10 +120,10 @@ def setup_cosmo_emu():
 
 
 def get_bounds(bias_param_names):
-    bias_bounds = {'b1': [-0.25, 1.75],
+    bias_bounds = {'b1': [-1, 2],
                 'b2': [-1, 2],
-                'bs2': [-3, 1],
-                'bl': [-5, 2],
+                'bs2': [-3.5, 3.5],
+                'bl': [-5, 14],
                 } 
     bounds = [bias_bounds[bname] for bname in bias_param_names]
     return bounds
