@@ -10,3 +10,9 @@ plots/
 
 # nohup
 nohup.out
+
+# vim
+Ignore vim files:
+*~
+*.swp
+*.swo
