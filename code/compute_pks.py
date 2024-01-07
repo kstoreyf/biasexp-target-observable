@@ -98,7 +98,7 @@ def setup_bacco():
     cosmo_Quijote.set_expfactor(a_Quijote)
 
     ngrid = 256 #1024 #512 #256 #128 #256 #1400
-    BoxSize=100/hubble
+    BoxSize=100/hubble #to be consistent w galaxy locs in Mpc
     args_power = {'ngrid':ngrid,
             'box':BoxSize,
             'cosmology':cosmo_Quijote,
@@ -116,10 +116,10 @@ def setup_bacco():
 
     bacco.configuration.update({'pknbody' : {'ngrid'  :  ngrid}})
     bacco.configuration.update({'pknbody' : {'log_binning' : True}})
-    bacco.configuration.update({'pknbody' : {'log_binning_kmax' : 0.99506136}})#
-    bacco.configuration.update({'pknbody' : {'log_binning_nbins' : 100}})
-    bacco.configuration.update({'pknbody' : {'min_k' : 0.01721049}})
-    bacco.configuration.update({'pk' : {'maxk' : 0.99506136}}) 
+    #bacco.configuration.update({'pknbody' : {'log_binning_kmax' : 0.99506136}})#
+    #bacco.configuration.update({'pknbody' : {'log_binning_nbins' : 100}})
+    #bacco.configuration.update({'pknbody' : {'min_k' : 0.01721049}})
+    #bacco.configuration.update({'pk' : {'maxk' : 0.99506136}}) 
     bacco.configuration.update({'pknbody' : {'interlacing' : True}})
 
     bacco.configuration.update({'pknbody' : {'depmethod' : 'cic'}})

@@ -1,4 +1,5 @@
 from functools import partial
+import h5py
 import multiprocessing as mp
 import numpy as np
 import os
@@ -41,6 +42,7 @@ def fit_bias_params_loop(idxs_sam, n_threads=2, overwrite=False):
         print("Done!")
     else:
         print("Starting serial loop")
+        initializer()
         outputs = []
         for idx_sam in idxs_sam:
             output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, vol=vol_Mpc, overwrite=overwrite)
@@ -57,11 +59,9 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
-    if not os.path.isfile(fn_pk):
+    if not os.path.isfile(fn_dat):
         print(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist! Moving on")
         return 1
-    with h5py.File(fn_dat, 'r') as f:
-        ndens = len(f['mstar'])/vol
 
     fn_pk = f'../data/pks/pk_LH_{idx_sam}.npy'
     if not os.path.isfile(fn_pk):
@@ -77,13 +77,17 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
     pk = np.load(fn_pk, allow_pickle=True).item()
     
     with h5py.File(fn_dat, 'r') as f:
-        ndens = len(f['mstar'])/vol
+        nbar = len(f['mstar'])/vol
 
     k_sam_all = pk['k']
     i_bins = k_sam_all < 0.75 #bc emulator can't go above this
     k_sam = k_sam_all[i_bins]
-    C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
+    #C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
     pk_sam = pk['pk'][i_bins]
+
+    err_poisson = pk['shotnoise'][i_bins]
+    err_1p = 0.01*pk_sam
+    variance = err_poisson**2 + err_1p**2
 
     print(f"Fitting SAM {idx_sam}")
     free_param_names = ['b1', 'b2', 'bs2', 'bl', 'Asn']
@@ -91,7 +95,7 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
     
     free_params_0 = [0.5, 0.5, 1.0, -1.0, 1.0]
     res = scipy.optimize.minimize(ln_like, free_params_0, bounds=bounds, 
-                                  args=(k_sam, pk_sam, C_inv, nbar, emulator, cosmo_params))
+                                  args=(k_sam, pk_sam, variance, nbar, emulator, cosmo_params))
     
     if res['success']:
         print(f"Fit for SAM {idx_sam} terminated successfully!")
@@ -103,7 +107,7 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
         return 1
 
 
-def ln_like(free_params, k_data, pk_data, C_inv, 
+def ln_like(free_params, k_data, pk_data, variance, 
             nbar, emulator, cosmo_params):
     bias_params = free_params[:4]
     A_sn = free_params[-1]
@@ -111,7 +115,8 @@ def ln_like(free_params, k_data, pk_data, C_inv,
                                              **cosmo_params)
     pk_model = pk_gg + A_sn/nbar
     delta_y = pk_data - pk_gg
-    lnlk = 0.5 * delta_y.T @ C_inv @ delta_y
+    lnlk = 0.5 * np.sum((delta_y/variance)**2)
+    #lnlk = 0.5 * delta_y.T @ C_inv @ delta_y
     return lnlk
 
 
