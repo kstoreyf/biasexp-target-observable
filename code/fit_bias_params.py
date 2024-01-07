@@ -30,28 +30,38 @@ def initializer():
 def fit_bias_params_loop(idxs_sam, n_threads=2, overwrite=False):
     
     cosmo_params = setup_cosmo_emu()
+    vol_Mpc = (100/cosmo_params['hubble'])**3 
 
     start = time.time()
     if n_threads>1:
         pool = mp.Pool(processes=n_threads, initializer=initializer)
         print("Starting multiprocessing pool")
         outputs = pool.map(partial(fit_bias_params,
-                             cosmo_params=cosmo_params, overwrite=overwrite), idxs_sam)
+                             cosmo_params=cosmo_params, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         print("Starting serial loop")
         outputs = []
         for idx_sam in idxs_sam:
-            output = fit_bias_params(idx_sam, emulator=emulator, cosmo_params=cosmo_params, overwrite=overwrite)
+            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, vol=vol_Mpc, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
     n_success = np.sum(outputs==0)
     print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
-def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
+def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
 
-    assert cosmo_params is not None, "Must pass emulator and cosmo_params!"
+    assert cosmo_params is not None and vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
+
+    redshift = 0
+    dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
+    fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
+    if not os.path.isfile(fn_pk):
+        print(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist! Moving on")
+        return 1
+    with h5py.File(fn_dat, 'r') as f:
+        ndens = len(f['mstar'])/vol
 
     fn_pk = f'../data/pks/pk_LH_{idx_sam}.npy'
     if not os.path.isfile(fn_pk):
@@ -66,6 +76,9 @@ def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
     print("Loading pk, setting up cov, etc")
     pk = np.load(fn_pk, allow_pickle=True).item()
     
+    with h5py.File(fn_dat, 'r') as f:
+        ndens = len(f['mstar'])/vol
+
     k_sam_all = pk['k']
     i_bins = k_sam_all < 0.75 #bc emulator can't go above this
     k_sam = k_sam_all[i_bins]
@@ -73,15 +86,16 @@ def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
     pk_sam = pk['pk'][i_bins]
 
     print(f"Fitting SAM {idx_sam}")
-    bias_param_names = ['b1', 'b2', 'bs2', 'bl']
-    bounds = get_bounds(bias_param_names)
-    bias_params_0 = [0.5, 0.5, 1.0, -1.0]
-    res = scipy.optimize.minimize(ln_like, bias_params_0, bounds=bounds, 
-                                  args=(k_sam, pk_sam, C_inv, emulator, cosmo_params))
+    free_param_names = ['b1', 'b2', 'bs2', 'bl', 'Asn']
+    bounds = get_bounds(free_param_names)
+    
+    free_params_0 = [0.5, 0.5, 1.0, -1.0, 1.0]
+    res = scipy.optimize.minimize(ln_like, free_params_0, bounds=bounds, 
+                                  args=(k_sam, pk_sam, C_inv, nbar, emulator, cosmo_params))
     
     if res['success']:
         print(f"Fit for SAM {idx_sam} terminated successfully!")
-        bias_params_fit_dict = dict(zip(bias_param_names, res['x']))
+        bias_params_fit_dict = dict(zip(free_param_names, res['x']))
         np.save(fn_bp, bias_params_fit_dict)
         return 0
     else:
@@ -89,11 +103,14 @@ def fit_bias_params(idx_sam, cosmo_params=None, overwrite=False):
         return 1
 
 
-def ln_like(bias_params, k_data, pk_data, C_inv, 
-            emulator, cosmo_params):
-    _, p_gg, _ = emulator.get_galaxy_real_pk(bias=bias_params, k=k_data, 
+def ln_like(free_params, k_data, pk_data, C_inv, 
+            nbar, emulator, cosmo_params):
+    bias_params = free_params[:4]
+    A_sn = free_params[-1]
+    _, pk_gg, _ = emulator.get_galaxy_real_pk(bias=bias_params, k=k_data, 
                                              **cosmo_params)
-    delta_y = pk_data - p_gg
+    pk_model = pk_gg + A_sn/nbar
+    delta_y = pk_data - pk_gg
     lnlk = 0.5 * delta_y.T @ C_inv @ delta_y
     return lnlk
 
@@ -119,13 +136,14 @@ def setup_cosmo_emu():
     return cosmo_params
 
 
-def get_bounds(bias_param_names):
-    bias_bounds = {'b1': [-1, 2],
-                'b2': [-1, 2],
-                'bs2': [-3.5, 3.5],
-                'bl': [-5, 14],
+def get_bounds(free_param_names):
+    bounds_dict = {'b1': [-5, 20],
+                'b2': [-5, 10],
+                'bs2': [-10, 20],
+                'bl': [-20, 30],
+                'Asn': [0, 2],
                 } 
-    bounds = [bias_bounds[bname] for bname in bias_param_names]
+    bounds = [bounds_dict[param_name] for param_name in free_param_names]
     return bounds
 
 
