@@ -3,6 +3,7 @@ import h5py
 import multiprocessing as mp
 import numpy as np
 import os
+import pandas as pd
 import scipy
 import time
 
@@ -14,21 +15,33 @@ def main():
     #idxs_sam = np.arange(6, 8)
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
-    idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
-                if os.path.isfile(f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5')]
-    fit_bias_params_loop(idxs_sam, n_threads=12, overwrite=False)
+    #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
+    #            if os.path.isfile(f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5')]
+    
+    fn_idxs = '../data/idxs_camelssam_in_emu_bounds.dat'
+    idxs_sam_inbounds = np.loadtxt(fn_idxs, dtype=int)
+    print(f'{len(idxs_sam_inbounds)} of SAMs have cosmo params in bounds') 
+    fn_params = '../data/params_CAMELS-SAM.dat'
+    df_params = pd.read_csv(fn_params, index_col='idx_LH')
+
+    fit_bias_params_loop(idxs_sam_inbounds, df_params, n_threads=12, overwrite=False)
 
 
 # Followed this to get multiprocessing with emulator to work
 # (using normal global not in this initializer function did not work)
 # https://stackoverflow.com/questions/18778187/multiprocessing-pool-with-a-global-variable
 def initializer():
-    print("Loading emulator")
     global emulator
-    emulator = baccoemu.Lbias_expansion()
+    emulator = load_emulator()
 
 
-def fit_bias_params_loop(idxs_sam, n_threads=2, overwrite=False):
+def load_emulator():
+    print("Loading emulator")
+    emu = baccoemu.Lbias_expansion()
+    return emu
+
+
+def fit_bias_params_loop(idxs_sam, df_params, n_threads=2, overwrite=False):
     
     cosmo_params = setup_cosmo_emu()
     vol_Mpc = (100/cosmo_params['hubble'])**3 
@@ -38,23 +51,24 @@ def fit_bias_params_loop(idxs_sam, n_threads=2, overwrite=False):
         pool = mp.Pool(processes=n_threads, initializer=initializer)
         print("Starting multiprocessing pool")
         outputs = pool.map(partial(fit_bias_params,
-                             cosmo_params=cosmo_params, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
+                             cosmo_params=cosmo_params, df_params=df_params, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         print("Starting serial loop")
         initializer()
         outputs = []
         for idx_sam in idxs_sam:
-            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, vol=vol_Mpc, overwrite=overwrite)
+            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, df_params=df_params, vol=vol_Mpc, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
     n_success = np.sum(outputs==0)
     print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
-def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
+def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, vol=None, overwrite=False):
 
     assert cosmo_params is not None and vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
+    assert df_params is not None, "Must pass df_params"
 
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
@@ -72,6 +86,11 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
     if os.path.isfile(fn_bp) and not overwrite:
         print(f"[SAM LH {idx_sam}] Bias param file {fn_bp} already exists and overwrite={overwrite}! Moving on")
         return 1
+
+    Omega_m = df_params.loc[idx_sam, 'Omega_m']
+    sigma_8 = df_params.loc[idx_sam, 'sigma_8']
+    cosmo_params['omega_cold'] = Omega_m
+    cosmo_params['sigma8_cold'] = sigma_8
 
     print("Loading pk, setting up cov, etc")
     pk = np.load(fn_pk, allow_pickle=True).item()
@@ -101,6 +120,7 @@ def fit_bias_params(idx_sam, cosmo_params=None, vol=None, overwrite=False):
         print(f"Fit for SAM {idx_sam} terminated successfully!")
         bias_params_fit_dict = dict(zip(free_param_names, res['x']))
         np.save(fn_bp, bias_params_fit_dict)
+        print(f"Saved bias params to {fn_bp}")
         return 0
     else:
         print(f"WARNING: Oh no, optimizer failed for SAM {idx_sam}! not saving params")
@@ -123,13 +143,13 @@ def ln_like(free_params, k_data, pk_data, variance,
 def setup_cosmo_emu():
     print("Setting up emulator cosmology")
     Ob = 0.049
-    Om = 0.3175
+    #Om = 0.3175
     hubble = 0.6711
     ns = 0.9624
-    sigma8 = 0.834
+    #sigma8 = 0.834
     cosmo_params = {
-        'omega_cold'    :  Om,
-        'sigma8_cold'   :  sigma8, # if A_s is not specified
+        #'omega_cold'    :  Om,
+        #'sigma8_cold'   :  sigma8, # if A_s is not specified
         'omega_baryon'  :  Ob,
         'ns'            :  ns,
         'hubble'        :  hubble,
