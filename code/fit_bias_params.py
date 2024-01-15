@@ -4,6 +4,7 @@ import multiprocessing as mp
 import numpy as np
 import os
 import pandas as pd
+from pathlib import Path
 import scipy
 import time
 
@@ -11,7 +12,9 @@ import baccoemu
 
 
 def main():
-    
+   
+    n_threads = 12
+    ndens_target = 0.003
     #idxs_sam = np.arange(6, 8)
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
@@ -20,11 +23,16 @@ def main():
     
     fn_idxs = '../data/idxs_camelssam_in_emu_bounds.dat'
     idxs_sam_inbounds = np.loadtxt(fn_idxs, dtype=int)
+    #idxs_sam_inbounds = idxs_sam_inbounds[:1]
     print(f'{len(idxs_sam_inbounds)} of SAMs have cosmo params in bounds') 
     fn_params = '../data/params_CAMELS-SAM.dat'
     df_params = pd.read_csv(fn_params, index_col='idx_LH')
+    
+    tag_pk = f'_n{ndens_target}'
+    dir_bp = f'../data/bias_params/bias_params{tag_pk}'
+    Path(dir_bp).mkdir(parents=True, exist_ok=True)
 
-    fit_bias_params_loop(idxs_sam_inbounds, df_params, n_threads=12, overwrite=False)
+    fit_bias_params_loop(idxs_sam_inbounds, df_params, tag_pk, n_threads=n_threads, overwrite=False)
 
 
 # Followed this to get multiprocessing with emulator to work
@@ -41,7 +49,7 @@ def load_emulator():
     return emu
 
 
-def fit_bias_params_loop(idxs_sam, df_params, n_threads=2, overwrite=False):
+def fit_bias_params_loop(idxs_sam, df_params, tag_pk, n_threads=2, overwrite=False):
     
     cosmo_params = setup_cosmo_emu()
     vol_Mpc = (100/cosmo_params['hubble'])**3 
@@ -51,24 +59,27 @@ def fit_bias_params_loop(idxs_sam, df_params, n_threads=2, overwrite=False):
         pool = mp.Pool(processes=n_threads, initializer=initializer)
         print("Starting multiprocessing pool")
         outputs = pool.map(partial(fit_bias_params,
-                             cosmo_params=cosmo_params, df_params=df_params, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
+                                   cosmo_params=cosmo_params, df_params=df_params, 
+                                   tag_pk=tag_pk, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         print("Starting serial loop")
         initializer()
         outputs = []
         for idx_sam in idxs_sam:
-            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, df_params=df_params, vol=vol_Mpc, overwrite=overwrite)
+            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, df_params=df_params, 
+                                     tag_pk=tag_pk, vol=vol_Mpc, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
+    outputs = np.array(outputs)
     n_success = np.sum(outputs==0)
     print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
-def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, vol=None, overwrite=False):
+def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, vol=None, overwrite=False):
 
-    assert cosmo_params is not None and vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
-    assert df_params is not None, "Must pass df_params"
+    assert cosmo_params is not None or vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
+    assert df_params is not None or tag_pk is not None, "Must pass df_params and tag_pk!"
 
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
@@ -77,12 +88,12 @@ def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, vol=None, overwr
         print(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist! Moving on")
         return 1
 
-    fn_pk = f'../data/pks/pk_LH_{idx_sam}.npy'
+    fn_pk = f'../data/pks/pks{tag_pk}/pk_LH_{idx_sam}.npy'
     if not os.path.isfile(fn_pk):
         print(f"[SAM LH {idx_sam}] P(k) file {fn_pk} does not exist! Moving on")
         return 1
-
-    fn_bp = f'../data/bias_params_bestfit/bias_params_LH_{idx_sam}.npy'
+    
+    fn_bp = f'../data/bias_params/bias_params{tag_pk}/bias_params_LH_{idx_sam}.npy'
     if os.path.isfile(fn_bp) and not overwrite:
         print(f"[SAM LH {idx_sam}] Bias param file {fn_bp} already exists and overwrite={overwrite}! Moving on")
         return 1
