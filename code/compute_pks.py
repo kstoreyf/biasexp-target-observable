@@ -15,7 +15,7 @@ def main():
 
     args_power = setup_bacco()
    
-    overwrite = True
+    overwrite = False
     n_threads = 12
     idx_max = 1000
     #idx_max = 1000
@@ -26,12 +26,13 @@ def main():
                 if os.path.isfile(f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5')]
 
     ndens_target = 0.003 # (Mpc/h)^-3
-    dir_pk = f'../data/pks/pks_n{ndens_target}'
+    tag_pk = f'_n{ndens_target}_hMpc'
+    dir_pk = f'../data/pks/pks{tag_pk}'
     Path(dir_pk).mkdir(parents=True, exist_ok=True)
-    compute_pks_loop(idxs_sam, ndens_target, args_power, overwrite=overwrite, n_threads=n_threads)
+    compute_pks_loop(idxs_sam, ndens_target, tag_pk, args_power, overwrite=overwrite, n_threads=n_threads)
 
 
-def compute_pks_loop(idxs_sam, ndens_target, args_power, overwrite=False, n_threads=2):
+def compute_pks_loop(idxs_sam, ndens_target, tag_pk, args_power, overwrite=False, n_threads=2):
     
     fn_params = '../data/params_CAMELS-SAM.dat'
     df_params = pd.read_csv(fn_params, index_col='idx_LH')
@@ -41,13 +42,14 @@ def compute_pks_loop(idxs_sam, ndens_target, args_power, overwrite=False, n_thre
         pool = mp.Pool(processes=n_threads)
         print("Starting multiprocessing pool")
         outputs = pool.map(partial(compute_pk, df_params=df_params, 
-                                   ndens_target=ndens_target, 
+                                   ndens_target=ndens_target, tag_pk=tag_pk,
                                    args_power=args_power, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         outputs = []
         for idx_sam in idxs_sam:
             output = compute_pk(idx_sam, df_params=df_params, ndens_target=ndens_target,
+                                tag_pk=tag_pk,
                                 args_power=args_power, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
@@ -57,7 +59,7 @@ def compute_pks_loop(idxs_sam, ndens_target, args_power, overwrite=False, n_thre
         
 
 
-def compute_pk(idx_sam, df_params=None, ndens_target=None, 
+def compute_pk(idx_sam, df_params=None, ndens_target=None, tag_pk=None,
                args_power=None, overwrite=False):
 
     assert ndens_target is not None or args_power is not None or df_params is not None, "Must pass df_params and ndens_target and args_power!"
@@ -70,7 +72,7 @@ def compute_pk(idx_sam, df_params=None, ndens_target=None,
         print(f"[SAM LH {idx_sam}] File {fn_dat} does not exist! Moving on")
         return 1
 
-    fn_pk = f'../data/pks/pks_n{ndens_target}/pk_LH_{idx_sam}.npy'
+    fn_pk = f'../data/pks/pks{tag_pk}/pk_LH_{idx_sam}.npy'
     if os.path.isfile(fn_pk) and not overwrite:
         print(f"[SAM LH {idx_sam}] Pk {fn_pk} already exists and overwrite={overwrite}! Moving on")
         return 1
@@ -88,7 +90,9 @@ def compute_pk(idx_sam, df_params=None, ndens_target=None,
         x_arr, y_arr, z_arr = f['x_position'], f['y_position'], f['z_position']
         pos_arr = np.array([x_arr, y_arr, z_arr]).T
         pos_arr = pos_arr[i_target]
-
+        # now in Mpc, put in h^-1 Mpc
+        # X*0.7 Mpc/h = X Mpc * 0.7/h
+        pos_arr *= cosmo.pars['hubble']
         pk = bacco.statistics.compute_powerspectrum(pos=pos_arr, **args_power)
         np.save(fn_pk, pk)
 
@@ -114,6 +118,7 @@ def setup_cosmology(Omega_m, sigma_8):
             tag="cosmo_CAMELS-SAM"
         )
         
+    # access parameter dict with cosmo.pars
     cosmo = bacco.Cosmology(**cosmopars)
     cosmo.set_expfactor(a_factor)
     return cosmo
@@ -128,7 +133,8 @@ def setup_bacco():
 
     hubble = 0.6711
     ngrid = 256 #1024 #512 #256 #128 #256 #1400
-    BoxSize=100/hubble
+    #BoxSize=100/hubble
+    BoxSize = 100 #Mpc/h
     args_power = {'ngrid':ngrid,
             'box':BoxSize,
             #'cosmology':cosmo_Quijote,
