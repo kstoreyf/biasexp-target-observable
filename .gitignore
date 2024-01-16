@@ -16,3 +16,6 @@ Ignore vim files:
 *~
 *.swp
 *.swo
+
+#python
+__pycache__/

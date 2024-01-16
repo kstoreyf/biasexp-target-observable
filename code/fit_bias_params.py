@@ -12,10 +12,10 @@ import baccoemu
 
 
 def main():
-   
+    
+    overwrite = True
     n_threads = 12
     ndens_target = 0.003
-    #idxs_sam = np.arange(6, 8)
     redshift = 0
     dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
@@ -32,7 +32,7 @@ def main():
     dir_bp = f'../data/bias_params/bias_params{tag_pk}'
     Path(dir_bp).mkdir(parents=True, exist_ok=True)
 
-    fit_bias_params_loop(idxs_sam_inbounds, df_params, tag_pk, n_threads=n_threads, overwrite=False)
+    fit_bias_params_loop(idxs_sam_inbounds, df_params, tag_pk, ndens_target, n_threads=n_threads, overwrite=overwrite)
 
 
 # Followed this to get multiprocessing with emulator to work
@@ -49,7 +49,7 @@ def load_emulator():
     return emu
 
 
-def fit_bias_params_loop(idxs_sam, df_params, tag_pk, n_threads=2, overwrite=False):
+def fit_bias_params_loop(idxs_sam, df_params, tag_pk, ndens_target, n_threads=2, overwrite=False):
     
     cosmo_params = setup_cosmo_emu()
     vol_Mpc = (100/cosmo_params['hubble'])**3 
@@ -60,7 +60,8 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, n_threads=2, overwrite=Fal
         print("Starting multiprocessing pool")
         outputs = pool.map(partial(fit_bias_params,
                                    cosmo_params=cosmo_params, df_params=df_params, 
-                                   tag_pk=tag_pk, vol=vol_Mpc, overwrite=overwrite), idxs_sam)
+                                   tag_pk=tag_pk, ndens_target=ndens_target,
+                                   vol=vol_Mpc, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         print("Starting serial loop")
@@ -68,7 +69,8 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, n_threads=2, overwrite=Fal
         outputs = []
         for idx_sam in idxs_sam:
             output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, df_params=df_params, 
-                                     tag_pk=tag_pk, vol=vol_Mpc, overwrite=overwrite)
+                                     tag_pk=tag_pk, ndens_target=ndens_target,
+                                     vol=vol_Mpc, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
     outputs = np.array(outputs)
@@ -76,7 +78,8 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, n_threads=2, overwrite=Fal
     print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
-def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, vol=None, overwrite=False):
+def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, 
+                    ndens_target=None, vol=None, overwrite=False):
 
     assert cosmo_params is not None or vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
     assert df_params is not None or tag_pk is not None, "Must pass df_params and tag_pk!"
@@ -106,11 +109,11 @@ def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, vol
     print("Loading pk, setting up cov, etc")
     pk = np.load(fn_pk, allow_pickle=True).item()
     
-    with h5py.File(fn_dat, 'r') as f:
-        nbar = len(f['mstar'])/vol
+    #with h5py.File(fn_dat, 'r') as f:
+    #    nbar = len(f['mstar'])/vol
 
     k_sam_all = pk['k']
-    i_bins = k_sam_all < 0.75 #bc emulator can't go above this
+    i_bins = (k_sam_all > 0.1) & (k_sam_all < 0.75) #bc emulator can't go above this
     k_sam = k_sam_all[i_bins]
     #C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
     pk_sam = pk['pk'][i_bins]
@@ -119,36 +122,44 @@ def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, vol
     err_1p = 0.01*pk_sam
     variance = err_poisson**2 + err_1p**2
 
-    print(f"Fitting SAM {idx_sam}")
+    print(f"Fitting SAM {idx_sam}", flush=True)
     free_param_names = ['b1', 'b2', 'bs2', 'bl', 'Asn']
     bounds = get_bounds(free_param_names)
-    
-    free_params_0 = [0.5, 0.5, 1.0, -1.0, 1.0]
-    res = scipy.optimize.minimize(ln_like, free_params_0, bounds=bounds, 
+    # ndens_target in mpc/h, need nbar in mpc to match pk
+    # Mpc = Mpc/h * h
+    nbar = ndens_target * cosmo_params['hubble']**3
+
+    #free_params_0 = [0.5, 0.5, 1.0, -1.0, 1.0]
+    free_params_0 = [0.5, 0.0, 1.25, -0.5, 1.0]
+    res = scipy.optimize.minimize(neg_ln_like, free_params_0, 
+                                  method='L-BFGS-B', 
+                                  #method='Nelder-Mead',
+                                  bounds=bounds, 
+                                  #tol=1e-7,
                                   args=(k_sam, pk_sam, variance, nbar, emulator, cosmo_params))
     
     if res['success']:
-        print(f"Fit for SAM {idx_sam} terminated successfully!")
+        print(f"Fit for SAM {idx_sam} terminated successfully after {res['nit']} iterations!", flush=True)
         bias_params_fit_dict = dict(zip(free_param_names, res['x']))
         np.save(fn_bp, bias_params_fit_dict)
         print(f"Saved bias params to {fn_bp}")
         return 0
     else:
-        print(f"WARNING: Oh no, optimizer failed for SAM {idx_sam}! not saving params")
+        print(f"WARNING: Oh no, optimizer failed for SAM {idx_sam}! not saving params", flush=True)
         return 1
 
 
-def ln_like(free_params, k_data, pk_data, variance, 
+def neg_ln_like(free_params, k_data, pk_data, variance, 
             nbar, emulator, cosmo_params):
     bias_params = free_params[:4]
     A_sn = free_params[-1]
     _, pk_gg, _ = emulator.get_galaxy_real_pk(bias=bias_params, k=k_data, 
                                              **cosmo_params)
     pk_model = pk_gg + A_sn/nbar
-    delta_y = pk_data - pk_gg
-    lnlk = 0.5 * np.sum((delta_y/variance)**2)
+    delta_y = pk_data - pk_model
+    neg_lnlk = 0.5 * np.sum(delta_y**2/variance)
     #lnlk = 0.5 * delta_y.T @ C_inv @ delta_y
-    return lnlk
+    return neg_lnlk
 
 
 def setup_cosmo_emu():
