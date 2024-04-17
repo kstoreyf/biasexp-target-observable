@@ -60,7 +60,7 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, tag_bpfit, ndens_target, n
     if n_threads>1:
         pool = mp.Pool(processes=n_threads, initializer=initializer)
         print("Starting multiprocessing pool")
-        outputs = pool.map(partial(fit_bias_params,
+        outputs = pool.map(partial(fit_bias_params_single,
                                    cosmo_params=cosmo_params, df_params=df_params, 
                                    tag_pk=tag_pk, tag_bpfit=tag_bpfit, ndens_target=ndens_target,
                                    vol=vol_hMpc, overwrite=overwrite), idxs_sam)
@@ -70,7 +70,7 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, tag_bpfit, ndens_target, n
         initializer()
         outputs = []
         for idx_sam in idxs_sam:
-            output = fit_bias_params(idx_sam, cosmo_params=cosmo_params, df_params=df_params, 
+            output = fit_bias_params_single(idx_sam, cosmo_params=cosmo_params, df_params=df_params, 
                                      tag_pk=tag_pk, tag_bpfit=tag_bpfit, ndens_target=ndens_target,
                                      vol=vol_hMpc, overwrite=overwrite)
             outputs.append(output)
@@ -80,7 +80,7 @@ def fit_bias_params_loop(idxs_sam, df_params, tag_pk, tag_bpfit, ndens_target, n
     print(f"Took {(end-start)/60} min to fit {n_success} bias param sets with N={n_threads} threads")
 
 
-def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, tag_bpfit=None,
+def fit_bias_params_single(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, tag_bpfit=None,
                     ndens_target=None, vol=None, overwrite=False):
 
     assert cosmo_params is not None or vol is not None, "Must pass cosmo_params and volume (in Mpc^3)!"
@@ -150,6 +150,45 @@ def fit_bias_params(idx_sam, cosmo_params=None, df_params=None, tag_pk=None, tag
     else:
         print(f"WARNING: Oh no, optimizer failed for SAM {idx_sam}! not saving params", flush=True)
         return 1
+
+# pulled this out into new func to call from notebook more easily
+def fit_bias_params(idx_sam, cosmo_params, fn_pk, ndens_target):
+
+    print("Loading pk, setting up cov, etc")
+    if not os.path.isfile(fn_pk):
+        raise ValueError(f"[SAM LH {idx_sam}] P(k) file {fn_pk} does not exist!")
+    pk = np.load(fn_pk, allow_pickle=True).item()
+    
+    #with h5py.File(fn_dat, 'r') as f:
+    #    nbar = len(f['mstar'])/vol
+    k_max = 0.7
+
+    k_sam_all = pk['k']
+    i_bins = (k_sam_all > 0.12) & (k_sam_all < k_max) 
+    k_sam = k_sam_all[i_bins]
+    #C_inv = np.diag(np.ones(len(k_sam))/len(k_sam))
+    pk_sam = pk['pk'][i_bins]
+
+    err_poisson = pk['shotnoise'][i_bins]
+    err_1p = 0.01*pk_sam
+    variance = err_poisson**2 + err_1p**2
+
+    print(f"Fitting SAM {idx_sam}", flush=True)
+    free_param_names = ['b1', 'b2', 'bs2', 'bl', 'Asn']
+    bounds = get_bounds(free_param_names)
+    # ndens_target in (mpc/h)^-3, need nbar in mpc to match pk
+    #nbar = ndens_target * cosmo_params['hubble']**3
+    nbar = ndens_target # both in (Mpc/h)^-3
+
+    #free_params_0 = [0.5, 0.5, 1.0, -1.0, 1.0]
+    free_params_0 = [0.5, 0.0, 1.25, -0.5, 1.0]
+    res = scipy.optimize.minimize(neg_ln_like, free_params_0, 
+                                  method='L-BFGS-B', 
+                                  #method='Nelder-Mead',
+                                  bounds=bounds, 
+                                  #tol=1e-7,
+                                  args=(k_sam, pk_sam, variance, nbar, emulator, cosmo_params))
+    return res
 
 
 def neg_ln_like(free_params, k_data, pk_data, variance, 
