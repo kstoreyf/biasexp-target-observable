@@ -18,7 +18,7 @@ def main():
     n_threads_mp = 4
     n_threads_bacco = 4
     ndens_target = 0.003
-    tag_bpfit = ''
+    tag_bpfit = '_fitJ2eq2'
     #redshift = 0
     #dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
@@ -30,6 +30,10 @@ def main():
     # idx_sam = 12 not working!! first in idxs_sam_inbounds, avoid w this line:
     idxs_sam_inbounds = idxs_sam_inbounds[1:]
     print(idxs_sam_inbounds)
+    
+    #TESTING SINGLE
+    idxs_sam_inbounds = idxs_sam_inbounds[:1]
+    
     fn_params = '../data/params_CAMELS-SAM.dat'
     df_params = pd.read_csv(fn_params, index_col='idx_LH')
     
@@ -110,13 +114,17 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     print("Getting qdata and tracer values")
     s = time.time()
     # Define what variables we consider, "J2" means density and "J4" means Laplacian
-    variables = ("J2", "J4")
+    #variables = ("J2", "J4")
+    spatial_order = 2
+    variables = ("J2",)
     pbm = pb.ProbabilisticBiasManager(sim, variables=variables, damping_scale=damping_scale, ngrid=ngrid) 
     # Define what bias parameters we want to measure
     # "J2" corresponds to b1, "J22" to b2, "J24" to bdeltaL, "J4" to bL, "J44" to bL**2
-    terms = ("J2", "J22", "J24", "J4", "J44")
-    param_names = ['b1', 'b2', 'bs2', 'bl', 'bl2']
-    model_expansion = pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=4)
+    #terms = ("J2", "J22", "J24", "J4", "J44")
+    terms = ("J2", "J22", "J2=2")
+    param_names = ['b1', 'b2', '2bs2']
+    #param_names = ['b1', 'b2', 'bs2', 'bl', 'bl2']
+    model_expansion = pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
 
     print('load tracer data', flush=True)
     pos_arr_hMpc, vel_arr, halo_id_arr = load_tracer_data(fn_dat, ndens_target, vol)
