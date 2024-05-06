@@ -14,11 +14,11 @@ import bacco.probabilistic_bias as pb
 
 def main():
     
-    overwrite = False
-    n_threads_mp = 4
-    n_threads_bacco = 4
+    overwrite = True
+    n_threads_mp = 1
+    n_threads_bacco = 8
     ndens_target = 0.003
-    tag_bpfit = '_fitJ2eq2'
+    tag_bpfit = ''
     #redshift = 0
     #dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
@@ -32,7 +32,7 @@ def main():
     print(idxs_sam_inbounds)
     
     #TESTING SINGLE
-    idxs_sam_inbounds = idxs_sam_inbounds[:1]
+    idxs_sam_inbounds = idxs_sam_inbounds[:5]
     
     fn_params = '../data/params_CAMELS-SAM.dat'
     df_params = pd.read_csv(fn_params, index_col='idx_LH')
@@ -43,7 +43,8 @@ def main():
     bacco.configuration.update({'number_of_threads': n_threads_bacco})
 
     fit_prob_bias_params_loop(idxs_sam_inbounds, df_params, dir_bp, tag_bpfit, ndens_target, 
-                              n_threads_mp=n_threads_mp, overwrite=overwrite)
+                              n_threads_mp=n_threads_mp, n_threads_bacco=n_threads_bacco, 
+                              overwrite=overwrite)
 
 
 
@@ -82,9 +83,13 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     
     box_size = 100.
     ngrid = 640 #TODO read in?
-    bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
+    LPT_order = 2
     seed_lpt = idx_sam + 5000 # from camels data gen
-    damping_scale=0.15 #TODO what to use?
+    damping_scale=0.2 #TODO what to use?
+    
+    bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
+    bacco.configuration.update({'scaling' : {'LPT_order' : LPT_order}})
+    bacco.configuration.update({'number_of_threads': n_threads_bacco})
 
     fn_bp = f'{dir_bp}/bias_params_LH_{idx_sam}.npy'
     if os.path.isfile(fn_bp) and not overwrite:
@@ -102,10 +107,9 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     # CREATE A ZA SIMULATION
     print("Generating LPT sim")
     s = time.time()
-    LPT_order = 2
     sim = bacco.utils.create_lpt_simulation(cosmo, box_size, Nmesh=ngrid, Seed=seed_lpt,
                                                         FixedInitialAmplitude=False,InitialPhase=0, 
-                                                        expfactor=1, LPT_order=LPT_order, order_by_order=None,
+                                                        expfactor=1.0, LPT_order=LPT_order, order_by_order=None,
                                                         phase_type=1, ngenic_phases=True, return_disp=False, 
                                                         sphere_mode=0)
     e = time.time()
@@ -114,43 +118,42 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     print("Getting qdata and tracer values")
     s = time.time()
     # Define what variables we consider, "J2" means density and "J4" means Laplacian
-    #variables = ("J2", "J4")
     spatial_order = 2
-    variables = ("J2",)
+    variables = ("J2", "J2=2")
     pbm = pb.ProbabilisticBiasManager(sim, variables=variables, damping_scale=damping_scale, ngrid=ngrid) 
     # Define what bias parameters we want to measure
     # "J2" corresponds to b1, "J22" to b2, "J24" to bdeltaL, "J4" to bL, "J44" to bL**2
     #terms = ("J2", "J22", "J24", "J4", "J44")
     terms = ("J2", "J22", "J2=2")
-    param_names = ['b1', 'b2', '2bs2']
-    #param_names = ['b1', 'b2', 'bs2', 'bl', 'bl2']
+    #param_names = ['b1', 'b2', '2bs2']
     model_expansion = pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
 
     print('load tracer data', flush=True)
-    pos_arr_hMpc, vel_arr, halo_id_arr = load_tracer_data(fn_dat, ndens_target, vol)
+    pos_arr_hMpc, vel_arr = load_tracer_data(fn_dat, ndens_target, vol)
     print("create qdata", flush=True)
     # pos_arr_hMpc = pos_arr_hMpc[:10]
     # vel_arr = vel_arr[:10]
     # halo_id_arr = halo_id_arr[:10]
-    qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, halo_id_arr, ngrid,
+    
+    # id is a dummy, barely affects output
+    id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
+    qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
                                 number_of_threads=n_threads_bacco)
 
-    # looked thru code, reproducing here to be able to do without a sim
     print('interpolate to get tracer values', flush=True)
-    tracer_q = qdata['pos'] #??
-    dm_field_ip = pbm._create_interpolator(pbm.dm_field)
-    tracer_value = dm_field_ip(tracer_q)
+    tracer_q = qdata['pos']
     e = time.time()
     print(f"qdata and tracer values gotten in {(e-s)/60} min", flush=True)
     
     
     print("Fitting bias")
-    b, bcov = pbm.fit_bias(model=model_expansion, tracer_value=tracer_value, tracer_q=tracer_q,
-                        error="jack4")
+    b, bcov = pbm.fit_bias(model=model_expansion, tracer_q=tracer_q,
+                           #tracer_value=tracer_value, 
+                           error="jack4")
 
     print('bias vec:', b)
     
-    bias_params_fit_dict = dict(zip(param_names, b))
+    bias_params_fit_dict = dict(zip(terms, b))
     bias_data = [bias_params_fit_dict, bcov]
     np.save(fn_bp, bias_data)
     print(f"Fit for SAM {idx_sam} complete. Saved bias params to {fn_bp}", flush=True)
@@ -191,16 +194,13 @@ def load_tracer_data(fn_dat, ndens_target, vol_hMpc):
     h = 0.6711
     pos_arr_hMpc = pos_arr*h
 
-    # don't know why negative!! for now just cut - but TODO ask Lucia
-    i_neg = np.any(pos_arr_hMpc<0,axis=1)    
-    print(f'Found {np.sum(i_neg)} positions with negative values! cutting')
-    pos_arr_hMpc = pos_arr_hMpc[~i_neg,:]
-    vel_arr = vel_arr[~i_neg,:]
-    halo_id_arr = halo_id_arr[~i_neg]
-    log_mstar = log_mstar[~i_neg]
-    log_mhalo = log_mhalo[~i_neg]
-        
-    return pos_arr_hMpc, vel_arr, halo_id_arr
+    # don't know why negative or >1000!! for now just cut, only few per sim - but TODO ask Lucia
+    i_oob = np.any(pos_arr_hMpc<0,axis=1) | np.any(pos_arr_hMpc>box_size,axis=1)
+    print(f'Found {np.sum(i_oob)} positions with negative values! cutting')
+    pos_arr_hMpc = pos_arr_hMpc[~i_oob,:]
+    vel_arr = vel_arr[~i_oob,:]
+    
+    return pos_arr_hMpc, vel_arr
     
 
 # adapted from bacco.simulation.create_qdata()
