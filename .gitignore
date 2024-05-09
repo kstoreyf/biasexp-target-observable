@@ -9,7 +9,7 @@ plots/
 .vscode
 
 # nohup
-nohup.out
+nohup*.out
 
 # vim
 Ignore vim files:

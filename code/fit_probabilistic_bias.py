@@ -14,11 +14,11 @@ import bacco.probabilistic_bias as pb
 
 def main():
     
-    overwrite = True
-    n_threads_mp = 1
-    n_threads_bacco = 8
+    overwrite = False
+    n_threads_mp = 2
+    n_threads_bacco = 4
     ndens_target = 0.003
-    tag_bpfit = ''
+    tag_bpfit = '_wsigma0_tracerqeul'
     #redshift = 0
     #dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
@@ -32,7 +32,7 @@ def main():
     print(idxs_sam_inbounds)
     
     #TESTING SINGLE
-    idxs_sam_inbounds = idxs_sam_inbounds[:5]
+    #idxs_sam_inbounds = idxs_sam_inbounds[:5]
     
     fn_params = '../data/params_CAMELS-SAM.dat'
     df_params = pd.read_csv(fn_params, index_col='idx_LH')
@@ -52,7 +52,7 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
                               n_threads_mp=2, n_threads_bacco=4, overwrite=False):
     
     #vol_Mpc = (100/cosmo_params['hubble'])**3 
-    vol_hMpc = 100**3
+    box_size = 100.0
 
     start = time.time()
     if n_threads_mp>1:
@@ -61,7 +61,7 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
         outputs = pool.map(partial(fit_prob_bias_params_single,
                                    df_params=df_params, 
                                    dir_bp=dir_bp, tag_bpfit=tag_bpfit, ndens_target=ndens_target,
-                                   vol=vol_hMpc, n_threads_bacco=n_threads_bacco, overwrite=overwrite), idxs_sam)
+                                   box_size=box_size, n_threads_bacco=n_threads_bacco, overwrite=overwrite), idxs_sam)
         print("Done!")
     else:
         print("Starting serial loop")
@@ -69,7 +69,7 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
         for idx_sam in idxs_sam:
             output = fit_prob_bias_params_single(idx_sam, df_params=df_params, 
                                      dir_bp=dir_bp, tag_bpfit=tag_bpfit, ndens_target=ndens_target,
-                                     vol=vol_hMpc, n_threads_bacco=n_threads_bacco, overwrite=overwrite)
+                                     box_size=box_size, n_threads_bacco=n_threads_bacco, overwrite=overwrite)
             outputs.append(output)
     end = time.time()
     outputs = np.array(outputs)
@@ -79,13 +79,13 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
 
 
 def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=None,
-                    ndens_target=None, vol=None, n_threads_bacco=4,overwrite=False):
+                    ndens_target=None, box_size=None, n_threads_bacco=4,overwrite=False):
     
-    box_size = 100.
     ngrid = 640 #TODO read in?
     LPT_order = 2
     seed_lpt = idx_sam + 5000 # from camels data gen
-    damping_scale=0.2 #TODO what to use?
+    damping_scale=0.2
+    print("damping scale =", damping_scale)
     
     bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
     bacco.configuration.update({'scaling' : {'LPT_order' : LPT_order}})
@@ -129,19 +129,20 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     model_expansion = pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
 
     print('load tracer data', flush=True)
-    pos_arr_hMpc, vel_arr = load_tracer_data(fn_dat, ndens_target, vol)
+    pos_arr_hMpc, vel_arr = load_tracer_data(fn_dat, ndens_target, box_size)
     print("create qdata", flush=True)
     # pos_arr_hMpc = pos_arr_hMpc[:10]
     # vel_arr = vel_arr[:10]
     # halo_id_arr = halo_id_arr[:10]
     
     # id is a dummy, barely affects output
-    id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
-    qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
-                                number_of_threads=n_threads_bacco)
+    #id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
+    #qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
+    #                            number_of_threads=n_threads_bacco)
 
-    print('interpolate to get tracer values', flush=True)
-    tracer_q = qdata['pos']
+    #tracer_q = qdata['pos']
+    print("EULERIAN POSITIONS AS TEST")
+    tracer_q = pos_arr_hMpc #EULERIAN POSITIONS AS TEST
     e = time.time()
     print(f"qdata and tracer values gotten in {(e-s)/60} min", flush=True)
     
@@ -150,21 +151,31 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     b, bcov = pbm.fit_bias(model=model_expansion, tracer_q=tracer_q,
                            #tracer_value=tracer_value, 
                            error="jack4")
-
+    bias_per_object = pbm.bias_model.bias_per_object(pbm.tr_value)
     print('bias vec:', b)
     
+    print("Get sigma0")
+    fields_sim_damped = sim.get_linear_field(ngrid=ngrid, damping_scale=damping_scale)
+    overdensity_bacco_damped = fields_sim_damped[0]
+    sigma_0_damped = np.sqrt(np.mean(overdensity_bacco_damped**2))
+    print("sigma0:", sigma_0_damped)
+
     bias_params_fit_dict = dict(zip(terms, b))
-    bias_data = [bias_params_fit_dict, bcov]
+    #bias_data = [bias_params_fit_dict, bcov, bias_per_object, sigma_0_damped]
+    bias_data = {'bias_param_dict': bias_params_fit_dict, 
+                 'bias_param_cov': bcov, 
+                 'bias_per_object': bias_per_object, 
+                 'sigma_0_damped': sigma_0_damped}
     np.save(fn_bp, bias_data)
     print(f"Fit for SAM {idx_sam} complete. Saved bias params to {fn_bp}", flush=True)
     return 0
 
     
     
-def load_tracer_data(fn_dat, ndens_target, vol_hMpc):
+def load_tracer_data(fn_dat, ndens_target, box_size):
         # data description: https://camels-sam.readthedocs.io/en/main/dataproducts.html
     # (note names don't match, not sure why - col names here: https://camels-sam.readthedocs.io/en/main/openSAM.html)
-    vol_hMpc = 100**3 # units Mpc/h!! 
+    vol_hMpc = box_size**3 # units Mpc/h!! 
     n_target = int(ndens_target * vol_hMpc)
     log_mass_shift = 9
 
