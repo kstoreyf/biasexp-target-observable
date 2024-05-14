@@ -65,3 +65,25 @@ def load_emu(emu_name='lbias_2.0'):
     emu_param_names = emu.emulator['nonlinear']['keys']
     emu_bounds =  emu.emulator['nonlinear']['bounds']
     return emu, emu_bounds, emu_param_names
+
+
+### BIAS
+
+bias_to_pbias_param_name_dict = {'b1': 'J2',
+                                 'b2': 'J22',
+                                 'bs2': 'J2=2'}
+
+def pbias_params_to_bias_params(pbias_param_dict, bias_param_names):
+    def _f_J2(J2):
+        return J2
+    def _f_J22(J22):
+        return J22
+    # 1/2 bJ2=2 = bK2
+    def _f_J2__2(J2__2):
+        return 0.5*J2__2
+    relation_dict = {'J2': _f_J2,
+                     'J22': _f_J22,
+                     'J2=2': _f_J2__2}
+    pbias_param_names = [bias_to_pbias_param_name_dict[bpn] for bpn in bias_param_names]
+    bias_params = [relation_dict[pbpn](pbias_param_dict[pbpn]) for pbpn in pbias_param_names]
+    return bias_params

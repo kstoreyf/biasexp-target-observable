@@ -15,21 +15,25 @@ import bacco.probabilistic_bias as pb
 def main():
     
     overwrite = False
-    n_threads_mp = 2
-    n_threads_bacco = 4
+    n_threads_mp = 6
+    n_threads_bacco = 2
     ndens_target = 0.003
-    tag_bpfit = '_wsigma0_tracerqeul'
+    tag_bpfit = '_wsigma0'
+    #tag_bpfit = '_wsigma0_tracerqeul'
     #redshift = 0
     #dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
     #idxs_sam = [idx_sam for idx_sam in np.arange(0, 1000) \
     #            if os.path.isfile(f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5')]
     
-    fn_idxs = '../data/idxs_camelssam_in_emu_bounds.dat'
-    idxs_sam_inbounds = np.loadtxt(fn_idxs, dtype=int)
-    print(f'{len(idxs_sam_inbounds)} of SAMs have cosmo params in bounds') 
-    # idx_sam = 12 not working!! first in idxs_sam_inbounds, avoid w this line:
-    idxs_sam_inbounds = idxs_sam_inbounds[1:]
-    print(idxs_sam_inbounds)
+    #fn_idxs = '../data/idxs_camelssam_in_emu_bounds.dat'
+    #idxs_sam = np.loadtxt(fn_idxs, dtype=int)
+    #print(f'{len(idxs_sam)} of SAMs have cosmo params in bounds') 
+    
+    idxs_sam = np.arange(1000)
+    #idxs_sam = np.array([1,2])
+    # idx_sam = 12 not working (TODO understand why)!! avoid w this line:
+    idxs_sam = np.delete(idxs_sam, np.argwhere(idxs_sam==12))
+    print(idxs_sam)
     
     #TESTING SINGLE
     #idxs_sam_inbounds = idxs_sam_inbounds[:5]
@@ -42,7 +46,7 @@ def main():
 
     bacco.configuration.update({'number_of_threads': n_threads_bacco})
 
-    fit_prob_bias_params_loop(idxs_sam_inbounds, df_params, dir_bp, tag_bpfit, ndens_target, 
+    fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_target, 
                               n_threads_mp=n_threads_mp, n_threads_bacco=n_threads_bacco, 
                               overwrite=overwrite)
 
@@ -131,18 +135,20 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     print('load tracer data', flush=True)
     pos_arr_hMpc, vel_arr = load_tracer_data(fn_dat, ndens_target, box_size)
     print("create qdata", flush=True)
+    
+    # tinytest purposes
     # pos_arr_hMpc = pos_arr_hMpc[:10]
     # vel_arr = vel_arr[:10]
     # halo_id_arr = halo_id_arr[:10]
     
     # id is a dummy, barely affects output
-    #id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
-    #qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
-    #                            number_of_threads=n_threads_bacco)
+    id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
+    qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
+                               number_of_threads=n_threads_bacco)
 
-    #tracer_q = qdata['pos']
-    print("EULERIAN POSITIONS AS TEST")
-    tracer_q = pos_arr_hMpc #EULERIAN POSITIONS AS TEST
+    tracer_q = qdata['pos']
+    #print("EULERIAN POSITIONS AS TEST")
+    #tracer_q = pos_arr_hMpc #EULERIAN POSITIONS AS TEST
     e = time.time()
     print(f"qdata and tracer values gotten in {(e-s)/60} min", flush=True)
     
