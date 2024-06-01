@@ -4,6 +4,18 @@ import os
 import baccoemu
 
 
+param_label_dict = {'omega_cold': r'$\Omega_\mathrm{cold}$',
+                'sigma8_cold': r'$\sigma_{8}$',
+                'sigma_8': r'$\sigma_{8}$',
+                'hubble': r'$h$',
+                'h': r'$h$',
+                'ns': r'$n_\mathrm{s}$',
+                'n_s': r'$n_\mathrm{s}$',
+                'omega_baryon': r'$\Omega_\mathrm{b}$',
+                'omega_m': r'$\Omega_\mathrm{m}$',
+                }
+
+
 def setup_cosmo_emu(cosmo='quijote'):
     print("Setting up emulator cosmology")
     if cosmo=='quijote':
@@ -87,3 +99,17 @@ def pbias_params_to_bias_params(pbias_param_dict, bias_param_names):
     pbias_param_names = [bias_to_pbias_param_name_dict[bpn] for bpn in bias_param_names]
     bias_params = [relation_dict[pbpn](pbias_param_dict[pbpn]) for pbpn in pbias_param_names]
     return bias_params
+
+
+def compute_smf(log_mstar, vol, bin_edges=None):
+
+    if bin_edges is None:
+        bin_edges = np.linspace(8, 12.5, 40)
+
+    bin_width = bin_edges[1] - bin_edges[0]      
+    bins_avg = 0.5*(bin_edges[1:] + bin_edges[:-1])          
+    #bins_avg = bin_edges[0:-1] + bin_edges/2.   
+    phi, _ = np.histogram(log_mstar, bins=bin_edges)   
+    smf = phi / vol / bin_width
+    
+    return bins_avg, smf
