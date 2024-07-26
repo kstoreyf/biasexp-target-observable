@@ -113,3 +113,11 @@ def compute_smf(log_mstar, vol, bin_edges=None):
     smf = phi / vol / bin_width
     
     return bins_avg, smf
+
+
+def get_colors(colorby_arr, cmap='viridis'):
+    import matplotlib
+    locs_norm = matplotlib.colors.Normalize(np.min(colorby_arr), np.max(colorby_arr), len(colorby_arr))
+    cmap = matplotlib.colormaps[cmap]
+    colors = cmap(locs_norm(colorby_arr))
+    return colors, cmap, locs_norm
