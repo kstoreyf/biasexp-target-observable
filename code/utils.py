@@ -13,6 +13,10 @@ param_label_dict = {'omega_cold': r'$\Omega_\mathrm{cold}$',
                 'n_s': r'$n_\mathrm{s}$',
                 'omega_baryon': r'$\Omega_\mathrm{b}$',
                 'omega_m': r'$\Omega_\mathrm{m}$',
+                'b1': r'$b_1$', 
+                'b2': r'$b_2$', 
+                'bs2': r'$b_{s^2}$', 
+                'bl': r'$b_{\nabla^2 \delta}$',
                 }
 
 
@@ -85,7 +89,13 @@ bias_to_pbias_param_name_dict = {'b1': 'J2',
                                  'b2': 'J22',
                                  'bs2': 'J2=2'}
 
-def pbias_params_to_bias_params(pbias_param_dict, bias_param_names):
+pbias_to_bias_param_name_dict = {'J2': 'b1',
+                                 'J22': 'b2', 
+                                 'J2=2': 'bs2'}
+
+def pbias_params_to_bias_params(pbias_param_dict, bias_param_names=None):
+    if bias_param_names is None:
+        bias_param_names = [pbias_to_bias_param_name_dict[pn] for pn in pbias_param_dict.keys()]
     def _f_J2(J2):
         return J2
     def _f_J22(J22):
@@ -98,7 +108,25 @@ def pbias_params_to_bias_params(pbias_param_dict, bias_param_names):
                      'J2=2': _f_J2__2}
     pbias_param_names = [bias_to_pbias_param_name_dict[bpn] for bpn in bias_param_names]
     bias_params = [relation_dict[pbpn](pbias_param_dict[pbpn]) for pbpn in pbias_param_names]
-    return bias_params
+    return bias_params, bias_param_names
+
+
+def pbias_cov_to_bias_cov(pbias_cov_dict, bias_param_names=None):
+    if bias_param_names is None:
+        bias_param_names = [pbias_to_bias_param_name_dict[pn] for pn in pbias_cov_dict.keys()]
+    def _f_J2_err(err_J2):
+        return err_J2
+    def _f_J22_err(err_J22):
+        return err_J22
+    # 1/2 bJ2=2 = bK2
+    def _f_J2__2_err(err_J2__2):
+        return 0.5*err_J2__2
+    relation_dict = {'J2': _f_J2_err,
+                     'J22': _f_J22_err,
+                     'J2=2': _f_J2__2_err}
+    pbias_param_names = [bias_to_pbias_param_name_dict[bpn] for bpn in bias_param_names]
+    bias_cov = [relation_dict[pbpn](pbias_cov_dict[pbpn]) for pbpn in pbias_param_names]
+    return bias_cov, bias_param_names
 
 
 def compute_smf(log_mstar, vol, bin_edges=None):
@@ -115,9 +143,12 @@ def compute_smf(log_mstar, vol, bin_edges=None):
     return bins_avg, smf
 
 
-def get_colors(colorby_arr, cmap='viridis'):
-    import matplotlib
-    locs_norm = matplotlib.colors.Normalize(np.min(colorby_arr), np.max(colorby_arr), len(colorby_arr))
+def get_colors(colorby_arr, cmap='viridis', log=False):
+    import matplotlib   
+    if log:
+        locs_norm = matplotlib.colors.LogNorm(np.min(colorby_arr), np.max(colorby_arr), len(colorby_arr))
+    else:
+        locs_norm = matplotlib.colors.Normalize(np.min(colorby_arr), np.max(colorby_arr), len(colorby_arr))
     cmap = matplotlib.colormaps[cmap]
     colors = cmap(locs_norm(colorby_arr))
     return colors, cmap, locs_norm
