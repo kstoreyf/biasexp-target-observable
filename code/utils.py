@@ -1,6 +1,7 @@
 import numpy as np 
 import os
 
+import bacco
 import baccoemu
 
 
@@ -53,6 +54,27 @@ def setup_cosmo_emu(cosmo='quijote'):
         raise ValueError(f'Cosmo {cosmo} not recognized!')
     return cosmo_params
 
+
+def setup_cosmo(cosmo_name, return_box_size=False):
+    if cosmo_name=='millennium_planck':
+        box_size = 480.279
+        omega_matter = 0.315
+        baryon_fraction = 0.155
+        omega_baryon = omega_matter * baryon_fraction
+        omega_cdm = omega_matter - omega_baryon
+        mill_planck_dict = {'omega_baryon': omega_baryon, #omega_m * baryon_fraction
+                    'omega_de': 0.685,
+                    'hubble': 0.673,
+                    'omega_cdm': omega_cdm,
+                    }
+        cosmo = bacco.Cosmology(verbose=False, **mill_planck_dict)
+    else:
+        raise ValueError(f'Cosmo {cosmo_name} not recognized!')
+    
+    if return_box_size:
+        return cosmo, box_size
+    else:
+        return cosmo
 
 
 def load_emu(emu_name='lbias_2.0'):

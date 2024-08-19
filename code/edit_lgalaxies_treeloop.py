@@ -13,18 +13,22 @@ def main():
     #tag_lgal = '_DM_fasttesting'
     
     tag_params = ''
-    tag_lgal = '_DM_orig_treeloop'
-
-    n_treefiles_max = 512
-    n_blocks = 8
-    # n_treefiles_max = 16
-    # n_blocks = 1
-    n_trees_per_block = n_treefiles_max // n_blocks
+    #tag_lgal = '_DM_orig_treeloop'
+    tag_lgal = '_DM_fasttesting_treeloop_refill'
+    version = 'test3'
+    memsize_mb = 80000
+    #memsize_mb = 6000 #default
+    
+    # 448 had a 26gb halo need, i used 30gb
+    #treefiles = [104, 108, 112, 140, 162, 166, 248, 388, 436, 437, 448, 497, 501] #missing from memory crashes 
+    #treefiles = [104, 108, 140, 248, 388, 436, 437, 497] #missing from memory crashes 
+    treefiles = [140] #missing from memory crashes 
+    #treefiles = [448] #missing from memory crashes 
+    treefile_lims = [[tf, tf] for tf in treefiles]
+    #treefile_lims = get_treefile_lims(n_blocks = 8, n_treefiles_max = 512)
 
     if tag_params is not '':
         param_df = pd.read_csv(f'../data/params_lgal/params_lgal{tag_params}.txt', index_col=0)
-        print(param_df.columns)
-        print(param_df)
         n_iparams = len(param_df)
     else:
         n_iparams = 1
@@ -58,11 +62,17 @@ def main():
         out_new = f'OutputDir		  ./output/output{tag_lgal}{tag_params}'
         filedata = filedata.replace(out_orig, out_new)
 
-
         # change the filename, to go with the iparam
+        if version is None:
+            version = tag_iparam[1:]
         fng_orig = 'FileNameGalaxies          SA_DM_test3'
-        fng_new = f'FileNameGalaxies          SA_DM{tag_iparam}'
+        fng_new = f'FileNameGalaxies          SA_DM_{version}'
         filedata = filedata.replace(fng_orig, fng_new)
+        
+        # memsize
+        memsize_orig = 'MaxMemSize                6000'
+        memsize_new = f'MaxMemSize                {memsize_mb}'
+        filedata = filedata.replace(memsize_orig, memsize_new)
         
         # loop thru the properties that we want to change, change the file data
         if tag_params is not '':
@@ -71,9 +81,9 @@ def main():
                 filedata = replace_property(filedata, prop, val)
         
         # if we want to break the tree files up, do it here  
-        for first_treefile in range(0, n_treefiles_max, n_trees_per_block):
+        #for first_treefile in range(0, n_treefiles_max, n_trees_per_block):
+        for first_treefile, last_treefile in treefile_lims:
     
-            last_treefile = first_treefile + n_trees_per_block - 1
             tag_trees = f'_tree{first_treefile}-{last_treefile}'
 
             fn_new = f'{dir_input}/input_MR_W1_PLANCK_LGals2020{tag_lgal}{tag_iparam}{tag_trees}.par'
@@ -91,6 +101,15 @@ def main():
             with open(fn_new, 'w') as file:
                 file.write(filedata)
             
+    
+    
+def get_treefile_lims(n_blocks = 8, n_treefiles_max = 512):
+    treefile_lims = []
+    n_trees_per_block = n_treefiles_max // n_blocks
+    for first_treefile in range(0, n_treefiles_max, n_trees_per_block):    
+        last_treefile = first_treefile + n_trees_per_block - 1
+        treefile_lims.append([first_treefile, last_treefile])
+    return treefile_lims
     
     
 def replace_property(text, property_name, val_new):

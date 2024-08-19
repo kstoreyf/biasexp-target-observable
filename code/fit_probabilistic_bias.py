@@ -12,6 +12,8 @@ import time
 import bacco
 import bacco.probabilistic_bias as pb
 
+import utils
+
 
 def main():
     
@@ -86,26 +88,41 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
 
 
 
-def setup_sim(sim_name='millennium', idx_sam=None):
+def setup_sim(sim_name='millennium', idx_sam=None, n_threads_bacco=8,
+              df_params=None):
+    
+    s = time.time()
 
     if sim_name=='millennium':
+        n_grid = 512 #??
+        # believe LPT order is 1 (ZA); see Springel 2005 (https://arxiv.org/pdf/astro-ph/0505010)
+        # which cites Heitmann 2004 (https://arxiv.org/pdf/astro-ph/0411795, S5.1)
+        LPT_order = 1 
+        # TODO changing LPT_order doesn't seem to be doing anything, CHECK
+        seed_millennium = 100672
+        cosmo, box_size = utils.setup_cosmo('millennium_planck', return_box_size=True)
+        sim = bacco.utils.create_lpt_simulation(cosmo, box_size, Nmesh=n_grid, 
+                                                Seed=seed_millennium,
+                                                FixedInitialAmplitude=False, InitialPhase=0, 
+                                                expfactor=1.0, LPT_order=LPT_order, order_by_order=None,
+                                                phase_type=None,
+                                                ngenic_phases=False, 
+                                                millennium_ics=True,
+                                                return_disp=False, 
+                                                sphere_mode=0)
         
-        
-    elif sim_name=='camels-same':
+    elif sim_name=='camelssam':
         
         if idx_sam is None:
             raise ValueError("Must specify idx_sam")
         
         ngrid = 640 #TODO read in?
+        box_size = 100.0
         LPT_order = 2
         seed_lpt = idx_sam + 5000 # from camels data gen
-    
-        redshift = 0
-        dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
-        fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
-        if not os.path.isfile(fn_dat):
-            raise ValueError(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist!")
 
+        if df_params is None:
+            raise ValueError("Must specify df_params for CAMELS-SAM")
         cosmo = setup_cosmo(df_params.loc[idx_sam])
 
         bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
@@ -114,21 +131,26 @@ def setup_sim(sim_name='millennium', idx_sam=None):
         
         # CREATE A ZA SIMULATION
         print("Generating LPT sim")
-        s = time.time()
         sim = bacco.utils.create_lpt_simulation(cosmo, box_size, Nmesh=ngrid, Seed=seed_lpt,
                                                             FixedInitialAmplitude=False,InitialPhase=0, 
                                                             expfactor=1.0, LPT_order=LPT_order, order_by_order=None,
                                                             phase_type=1, ngenic_phases=True, return_disp=False, 
                                                             sphere_mode=0)
-        print(f"LPT sim generated in {(e-s)/60} min")
 
     else:
         raise ValueError(f"Invalid sim_name {sim_name}")
+    
+    e = time.time()
+    print(f"LPT sim generated in {(e-s)/60} min")
+
+    return sim
 
 
 def setup_pbm(sim, damping_scale=0.2):
     
-    ngrid = sim.ngrid #TODO check if this is fine??
+    s = time.time()
+    ngrid = sim.Nmesh #TODO check if this is fine??
+    print(ngrid)
     # Define what variables we consider, "J2" means density and "J4" means Laplacian
     spatial_order = 2
     variables = ("J2", "J2=2")
@@ -138,10 +160,10 @@ def setup_pbm(sim, damping_scale=0.2):
     # "J2" corresponds to b1, "J22" to b2, "J24" to bdeltaL, "J4" to bL, "J44" to bL**2
     #terms = ("J2", "J22", "J24", "J4", "J44")
     terms = ("J2", "J22", "J2=2")
-    #param_names = ['b1', 'b2', '2bs2']
     # this becomes self.bias_model
     pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
     e = time.time()
+    print(f"PB setup in {(e-s)/60} min")
 
     return pbm
 
@@ -150,6 +172,11 @@ def setup_pbm(sim, damping_scale=0.2):
 def fit_prob_bias_params_single(sim, pbm, tag, idx_sam, df_params=None, dir_bp=None, tag_bpfit=None,
                     ndens_target=None, box_size=None, n_threads_bacco=4,overwrite=False):
     
+    redshift = 0
+    dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
+    fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
+    if not os.path.isfile(fn_dat):
+        raise ValueError(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist!")
 
     fn_bp = f'{dir_bp}/bias_params_LH_{idx_sam}.npy'
     if os.path.isfile(fn_bp) and not overwrite:
@@ -169,7 +196,7 @@ def fit_prob_bias_params_single(sim, pbm, tag, idx_sam, df_params=None, dir_bp=N
     # vel_arr = vel_arr[:10]
     # halo_id_arr = halo_id_arr[:10]
     
-    ngrid = sim.ngrid #TODO check if this is fine??
+    ngrid = sim.Nmesh #TODO check if this is fine??
 
     # id is a dummy, barely affects output
     id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
@@ -207,29 +234,39 @@ def fit_prob_bias_params_single(sim, pbm, tag, idx_sam, df_params=None, dir_bp=N
     return 0
 
 
-def get_volume_Mpc(box_size, h, fn_dat):
+def get_volume_Mpc(box_size, h, fn_dat=None, n_trees=None):
+    assert fn_dat is not None or n_trees is not None, "Need either fn_dat or n_trees"
     TotTreeFiles = 512
-    matches = re.search(r"tree(\d+)-(\d+)", fn_dat)
-    ft, lt = int(matches.group(1)), int(matches.group(2))
-    #numbers = re.findall(r'\d+', tag_trees)
-    #ft, lt = int(numbers[0]), int(numbers[1])
-    TreeFilesUsed_thisfile = lt - ft +1
+    if fn_dat is not None:
+        matches = re.search(r"tree(\d+)-(\d+)", fn_dat)
+        ft, lt = int(matches.group(1)), int(matches.group(2))
+        #numbers = re.findall(r'\d+', tag_trees)
+        #ft, lt = int(numbers[0]), int(numbers[1])
+        TreeFilesUsed_thisfile = lt - ft + 1
+    else:
+        TreeFilesUsed_thisfile = n_trees
     vol_Mpch_thisfile = box_size**3 * TreeFilesUsed_thisfile / TotTreeFiles
     vol_Mpc_thisfile = vol_Mpch_thisfile / h**3 # X Mpc/h * (h/0.7) = X/0.7 Mpc
     return vol_Mpc_thisfile
     
     
-def load_tracer_data_lgalaxies(fn_dat, ndens_target, box_size, h,
-                                return_masses=False):
+def load_tracer_data_lgalaxies(ndens_target, box_size, h,
+                               fn_dat=None, gals=None,
+                               n_trees=None,
+                               return_masses=False):
 
+    assert fn_dat is not None or gals is not None, "Need either fn_dat or gals"
+    if gals is not None:
+        assert n_trees is not None, "If using gals, need n_trees"
     # from main_lgals.py:
     # Volume = (BoxSideLength**3.0) * TreeFilesUsed / TotTreeFiles
     # TotTreeFiles = 512
     # vol_hMpc = box_size**3 * TreeFilesUsed / TotTreeFiles
-    vol_Mpc_thisfile = get_volume_Mpc(box_size, h, fn_dat)
+    vol_Mpc_thisfile = get_volume_Mpc(box_size, h, fn_dat=fn_dat, n_trees=n_trees)
     n_target = int(ndens_target * vol_Mpc_thisfile)
     
-    gals = np.load(fn_dat)
+    if fn_dat is not None:
+        gals = np.load(fn_dat)
     print("Total number of gals initially:", len(gals))
     
     log_mstar = np.log10(gals['StellarMass'])
