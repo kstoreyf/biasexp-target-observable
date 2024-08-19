@@ -5,6 +5,7 @@ import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import re
 import scipy
 import time
 
@@ -57,6 +58,8 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
     
     #vol_Mpc = (100/cosmo_params['hubble'])**3 
     box_size = 100.0
+    
+    pbm = setup_pbm()
 
     start = time.time()
     if n_threads_mp>1:
@@ -82,55 +85,80 @@ def fit_prob_bias_params_loop(idxs_sam, df_params, dir_bp, tag_bpfit, ndens_targ
             mp threads, {n_threads_bacco} bacco threads")
 
 
-def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=None,
-                    ndens_target=None, box_size=None, n_threads_bacco=4,overwrite=False):
+
+def setup_sim(sim_name='millennium', idx_sam=None):
+
+    if sim_name=='millennium':
+        
+        
+    elif sim_name=='camels-same':
+        
+        if idx_sam is None:
+            raise ValueError("Must specify idx_sam")
+        
+        ngrid = 640 #TODO read in?
+        LPT_order = 2
+        seed_lpt = idx_sam + 5000 # from camels data gen
     
-    ngrid = 640 #TODO read in?
-    LPT_order = 2
-    seed_lpt = idx_sam + 5000 # from camels data gen
-    damping_scale=0.2
-    print("damping scale =", damping_scale)
+        redshift = 0
+        dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
+        fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
+        if not os.path.isfile(fn_dat):
+            raise ValueError(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist!")
+
+        cosmo = setup_cosmo(df_params.loc[idx_sam])
+
+        bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
+        bacco.configuration.update({'scaling' : {'LPT_order' : LPT_order}})
+        bacco.configuration.update({'number_of_threads': n_threads_bacco})
+        
+        # CREATE A ZA SIMULATION
+        print("Generating LPT sim")
+        s = time.time()
+        sim = bacco.utils.create_lpt_simulation(cosmo, box_size, Nmesh=ngrid, Seed=seed_lpt,
+                                                            FixedInitialAmplitude=False,InitialPhase=0, 
+                                                            expfactor=1.0, LPT_order=LPT_order, order_by_order=None,
+                                                            phase_type=1, ngenic_phases=True, return_disp=False, 
+                                                            sphere_mode=0)
+        print(f"LPT sim generated in {(e-s)/60} min")
+
+    else:
+        raise ValueError(f"Invalid sim_name {sim_name}")
+
+
+def setup_pbm(sim, damping_scale=0.2):
     
-    bacco.configuration.update({'scaling' : {'disp_ngrid' : 640}})
-    bacco.configuration.update({'scaling' : {'LPT_order' : LPT_order}})
-    bacco.configuration.update({'number_of_threads': n_threads_bacco})
-
-    fn_bp = f'{dir_bp}/bias_params_LH_{idx_sam}.npy'
-    if os.path.isfile(fn_bp) and not overwrite:
-        print(f"[SAM LH {idx_sam}] Prob bias param file {fn_bp} already exists and overwrite={overwrite}! Moving on")
-        return 1
-    
-    redshift = 0
-    dir_dat = '/lscratch/kstoreyf/CAMELS-SAM_data'
-    fn_dat = f'{dir_dat}/LH_{idx_sam}_galprops_z{redshift}.hdf5'
-    if not os.path.isfile(fn_dat):
-        raise ValueError(f"[SAM LH {idx_sam}] Data file {fn_dat} does not exist!")
-
-    cosmo = setup_cosmo(df_params.loc[idx_sam])
-
-    # CREATE A ZA SIMULATION
-    print("Generating LPT sim")
-    s = time.time()
-    sim = bacco.utils.create_lpt_simulation(cosmo, box_size, Nmesh=ngrid, Seed=seed_lpt,
-                                                        FixedInitialAmplitude=False,InitialPhase=0, 
-                                                        expfactor=1.0, LPT_order=LPT_order, order_by_order=None,
-                                                        phase_type=1, ngenic_phases=True, return_disp=False, 
-                                                        sphere_mode=0)
-    e = time.time()
-    print(f"LPT sim generated in {(e-s)/60} min")
-
-    print("Getting qdata and tracer values")
-    s = time.time()
+    ngrid = sim.ngrid #TODO check if this is fine??
     # Define what variables we consider, "J2" means density and "J4" means Laplacian
     spatial_order = 2
     variables = ("J2", "J2=2")
+    print("damping scale =", damping_scale)
     pbm = pb.ProbabilisticBiasManager(sim, variables=variables, damping_scale=damping_scale, ngrid=ngrid) 
     # Define what bias parameters we want to measure
     # "J2" corresponds to b1, "J22" to b2, "J24" to bdeltaL, "J4" to bL, "J44" to bL**2
     #terms = ("J2", "J22", "J24", "J4", "J44")
     terms = ("J2", "J22", "J2=2")
     #param_names = ['b1', 'b2', '2bs2']
-    model_expansion = pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
+    # this becomes self.bias_model
+    pbm.setup_bias_model(pb.TensorBiasND, terms=terms, spatial_order=spatial_order)
+    e = time.time()
+
+    return pbm
+
+
+
+def fit_prob_bias_params_single(sim, pbm, tag, idx_sam, df_params=None, dir_bp=None, tag_bpfit=None,
+                    ndens_target=None, box_size=None, n_threads_bacco=4,overwrite=False):
+    
+
+    fn_bp = f'{dir_bp}/bias_params_LH_{idx_sam}.npy'
+    if os.path.isfile(fn_bp) and not overwrite:
+        print(f"[SAM LH {idx_sam}] Prob bias param file {fn_bp} already exists and overwrite={overwrite}! Moving on")
+        return 1
+    
+    s = time.time()
+
+    print("Getting qdata and tracer values")
 
     print('load tracer data', flush=True)
     pos_arr_hMpc, vel_arr = load_tracer_data(fn_dat, ndens_target, box_size)
@@ -141,6 +169,8 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     # vel_arr = vel_arr[:10]
     # halo_id_arr = halo_id_arr[:10]
     
+    ngrid = sim.ngrid #TODO check if this is fine??
+
     # id is a dummy, barely affects output
     id_arr = np.ones(len(pos_arr_hMpc), dtype=int)
     qdata = create_qdata_custom(sim, pos_arr_hMpc, vel_arr, id_arr, ngrid,
@@ -154,19 +184,19 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     
     
     print("Fitting bias")
-    b, bcov = pbm.fit_bias(model=model_expansion, tracer_q=tracer_q,
+    b, bcov = pbm.fit_bias(model=pbm.bias_model, tracer_q=tracer_q,
                            #tracer_value=tracer_value, 
                            error="jack4")
     bias_per_object = pbm.bias_model.bias_per_object(pbm.tr_value)
     print('bias vec:', b)
     
     print("Get sigma0")
-    fields_sim_damped = sim.get_linear_field(ngrid=ngrid, damping_scale=damping_scale)
+    fields_sim_damped = sim.get_linear_field(ngrid=ngrid, damping_scale=pbm.damping_scale)
     overdensity_bacco_damped = fields_sim_damped[0]
     sigma_0_damped = np.sqrt(np.mean(overdensity_bacco_damped**2))
     print("sigma0:", sigma_0_damped)
 
-    bias_params_fit_dict = dict(zip(terms, b))
+    bias_params_fit_dict = dict(zip(pbm.terms, b))
     #bias_data = [bias_params_fit_dict, bcov, bias_per_object, sigma_0_damped]
     bias_data = {'bias_param_dict': bias_params_fit_dict, 
                  'bias_param_cov': bcov, 
@@ -176,9 +206,56 @@ def fit_prob_bias_params_single(idx_sam, df_params=None, dir_bp=None, tag_bpfit=
     print(f"Fit for SAM {idx_sam} complete. Saved bias params to {fn_bp}", flush=True)
     return 0
 
+
+def get_volume_Mpc(box_size, h, fn_dat):
+    TotTreeFiles = 512
+    matches = re.search(r"tree(\d+)-(\d+)", fn_dat)
+    ft, lt = int(matches.group(1)), int(matches.group(2))
+    #numbers = re.findall(r'\d+', tag_trees)
+    #ft, lt = int(numbers[0]), int(numbers[1])
+    TreeFilesUsed_thisfile = lt - ft +1
+    vol_Mpch_thisfile = box_size**3 * TreeFilesUsed_thisfile / TotTreeFiles
+    vol_Mpc_thisfile = vol_Mpch_thisfile / h**3 # X Mpc/h * (h/0.7) = X/0.7 Mpc
+    return vol_Mpc_thisfile
     
     
-def load_tracer_data(fn_dat, ndens_target, box_size):
+def load_tracer_data_lgalaxies(fn_dat, ndens_target, box_size, h,
+                                return_masses=False):
+
+    # from main_lgals.py:
+    # Volume = (BoxSideLength**3.0) * TreeFilesUsed / TotTreeFiles
+    # TotTreeFiles = 512
+    # vol_hMpc = box_size**3 * TreeFilesUsed / TotTreeFiles
+    vol_Mpc_thisfile = get_volume_Mpc(box_size, h, fn_dat)
+    n_target = int(ndens_target * vol_Mpc_thisfile)
+    
+    gals = np.load(fn_dat)
+    print("Total number of gals initially:", len(gals))
+    
+    log_mstar = np.log10(gals['StellarMass'])
+    i_target = np.argsort(log_mstar)[::-1][:n_target] # order by mstar and take largest to smallest to get desired ndens
+    log_mstar = log_mstar[i_target]
+
+    # Pos, 1/h Mpc , Comoving galaxy/subhalo position
+    # (from ./input/hdf5_field_props.txt)
+    pos_arr = gals['Pos']
+    pos_arr_hMpc = pos_arr*h
+    pos_arr_hMpc = pos_arr_hMpc[i_target]
+
+    # velocity in km/s
+    vel_arr = gals['Vel']
+    vel_arr = vel_arr[i_target]
+    
+    if return_masses:
+        log_mvir = np.log10(gals['Mvir'])
+        log_mvir = log_mvir[i_target]
+        return pos_arr_hMpc, vel_arr, log_mstar, log_mvir
+    else:
+        return pos_arr_hMpc, vel_arr
+    
+    
+    
+def load_tracer_data_camelssam(fn_dat, ndens_target, box_size):
         # data description: https://camels-sam.readthedocs.io/en/main/dataproducts.html
     # (note names don't match, not sure why - col names here: https://camels-sam.readthedocs.io/en/main/openSAM.html)
     vol_hMpc = box_size**3 # units Mpc/h!! 
@@ -218,7 +295,7 @@ def load_tracer_data(fn_dat, ndens_target, box_size):
     vel_arr = vel_arr[~i_oob,:]
     
     return pos_arr_hMpc, vel_arr
-    
+
 
 # adapted from bacco.simulation.create_qdata()
 # https://bitbucket.org/rangulo/baccogit/src/5766697248ceb5d0554a4c78c067dd6309f008ee/bacco/simulation.py#lines-5850
