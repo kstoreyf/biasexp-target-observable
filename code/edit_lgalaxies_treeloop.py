@@ -13,17 +13,17 @@ def main():
     #tag_lgal = '_DM_fasttesting'
     
     tag_params = ''
-    #tag_lgal = '_DM_orig_treeloop'
-    tag_lgal = '_DM_fasttesting_treeloop_refill'
-    version = 'test3'
+    tag_lgal = '_DM_orig_treeloop_refillmem'
+    #tag_lgal = '_DM_fasttesting_treeloop_refill'
+    #version = 'test3'
+    version = ''
     memsize_mb = 80000
+    #memsize_mb = 35000
     #memsize_mb = 6000 #default
     
-    # 448 had a 26gb halo need, i used 30gb
-    #treefiles = [104, 108, 112, 140, 162, 166, 248, 388, 436, 437, 448, 497, 501] #missing from memory crashes 
-    #treefiles = [104, 108, 140, 248, 388, 436, 437, 497] #missing from memory crashes 
-    treefiles = [140] #missing from memory crashes 
-    #treefiles = [448] #missing from memory crashes 
+    # redo cuz memory crashes!
+    #treefiles = [104, 108, 112, 162, 166, 248, 388, 436, 437, 448, 497, 501] # these need 35000 
+    treefiles = [140] # this needs 80000
     treefile_lims = [[tf, tf] for tf in treefiles]
     #treefile_lims = get_treefile_lims(n_blocks = 8, n_treefiles_max = 512)
 
@@ -65,8 +65,11 @@ def main():
         # change the filename, to go with the iparam
         if version is None:
             version = tag_iparam[1:]
+        if version!='':
+            version = '_'+version
+            
         fng_orig = 'FileNameGalaxies          SA_DM_test3'
-        fng_new = f'FileNameGalaxies          SA_DM_{version}'
+        fng_new = f'FileNameGalaxies          SA_DM{version}'
         filedata = filedata.replace(fng_orig, fng_new)
         
         # memsize
