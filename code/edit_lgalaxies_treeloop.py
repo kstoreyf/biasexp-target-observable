@@ -11,20 +11,28 @@ def main():
 
     #tag_params = '_AgnEfficiency_n10'
     #tag_lgal = '_DM_fasttesting'
-    
-    tag_params = ''
-    tag_lgal = '_DM_orig_treeloop_refillmem'
+    #tag_params = '_FeedbackEjectionEfficiency_n10'
+    tag_params = '_minmax'
+    tag_lgal = '_DM'
+    tag_version = None # will fill in automatically with iparam below
+    # NOTE treelims is INCLUSIVE!
+    #treefile_lims = [[0,7], [8,15]]
+    treefile_lims = [[0,7]]
+
+    #tag_params = ''
+    #tag_lgal = '_DM_orig_treeloop_refillmem'
     #tag_lgal = '_DM_fasttesting_treeloop_refill'
     #version = 'test3'
-    version = ''
-    memsize_mb = 80000
+    #version = ''
+    
+    #memsize_mb = 80000
     #memsize_mb = 35000
-    #memsize_mb = 6000 #default
+    memsize_mb = 6000 #default
     
     # redo cuz memory crashes!
     #treefiles = [104, 108, 112, 162, 166, 248, 388, 436, 437, 448, 497, 501] # these need 35000 
-    treefiles = [140] # this needs 80000
-    treefile_lims = [[tf, tf] for tf in treefiles]
+    #treefiles = [140] # this needs 80000
+    #treefile_lims = [[tf, tf] for tf in treefiles]
     #treefile_lims = get_treefile_lims(n_blocks = 8, n_treefiles_max = 512)
 
     if tag_params is not '':
@@ -63,13 +71,11 @@ def main():
         filedata = filedata.replace(out_orig, out_new)
 
         # change the filename, to go with the iparam
-        if version is None:
-            version = tag_iparam[1:]
-        if version!='':
-            version = '_'+version
-            
+        if tag_version is None:
+            tag_version = tag_iparam
+        
         fng_orig = 'FileNameGalaxies          SA_DM_test3'
-        fng_new = f'FileNameGalaxies          SA_DM{version}'
+        fng_new = f'FileNameGalaxies          SA_DM{tag_version}'
         filedata = filedata.replace(fng_orig, fng_new)
         
         # memsize
@@ -80,8 +86,9 @@ def main():
         # loop thru the properties that we want to change, change the file data
         if tag_params is not '':
             for prop in param_df.columns:
-                val = param_df[prop][i_param]
-                filedata = replace_property(filedata, prop, val)
+                if prop in filedata: # avoids metadata columns like name_iparam
+                    val = param_df[prop][i_param]
+                    filedata = replace_property(filedata, prop, val)
         
         # if we want to break the tree files up, do it here  
         #for first_treefile in range(0, n_treefiles_max, n_trees_per_block):
